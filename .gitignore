@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data cache + arena state (regenerated at runtime)
+data/*.csv
+data/*.json
+
+# Local notes, not part of the public project
+CLAUDE.md
+HANDOFF.md
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

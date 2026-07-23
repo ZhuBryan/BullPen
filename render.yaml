@@ -1,0 +1,32 @@
+# render.yaml — "Infrastructure as Code" / Render Blueprint.
+#
+# This file lets Render automatically set up the Bullpen web service for you.
+# On render.com: "New +" -> "Blueprint" -> connect this repo -> Render reads
+# this file and creates everything below. No manual config needed.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # One web service = one running copy of our FastAPI app.
+  - type: web
+    # Internal name Render shows in its dashboard. Change this if you like —
+    # it doesn't have to match the GitHub repo name.
+    name: bullpen
+
+    # "python" tells Render to use its standard Python build/runtime image.
+    runtime: python
+
+    # The free plan: $0/month. It "spins down" (sleeps) after ~15 minutes
+    # with no traffic, and the next request takes ~30-50s to wake it back
+    # up. Perfectly fine for a portfolio/demo project.
+    plan: free
+
+    # Installs everything listed in requirements.txt (fastapi, uvicorn,
+    # pandas, numpy, yfinance) before starting the app.
+    buildCommand: pip install -r requirements.txt
+
+    # How Render actually starts the server. run.py reads the $PORT
+    # environment variable that Render sets automatically (it's different
+    # every time, NOT always 8000) and binds to 0.0.0.0 so traffic from
+    # outside the container can reach it.
+    startCommand: python run.py

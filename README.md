@@ -1,0 +1,122 @@
+# Bullpen: Trading Arena & Backtester
+
+Bullpen is a free paper-trading arena where rule-based trading bots compete on real market data, paired with a full strategy backtester. You can write your own trading rules in plain text. No coding required, no API keys, and no costs.
+
+Everything runs on free Yahoo Finance data through `yfinance`. If you're offline, the app falls back to realistic synthetic prices so it keeps working.
+
+## Quick start
+
+```bash
+pip install -r requirements.txt
+python run.py
+```
+
+Then open http://localhost:8000.
+
+## Deploy it for free
+
+You can put Bullpen online for free in a few minutes using [Render](https://render.com) and its free web service tier:
+
+1. Push this repo to GitHub (if you haven't already).
+2. Create a free account at [render.com](https://render.com).
+3. Click "New +", then "Blueprint".
+4. Connect your GitHub repo. Render reads the `render.yaml` at the project root and fills in the build command, start command, and free plan for you.
+5. Click Deploy.
+
+When it finishes, your app is live at a URL like `https://your-app.onrender.com`.
+
+One thing to know about the free tier: it goes to sleep after about 15 minutes without traffic. The first request after it wakes up takes roughly 30 to 50 seconds, which is expected. Every request after that runs at full speed until it goes idle again.
+
+## Arena tab: watch strategies fight it out
+
+Five bots (Warren the trend-follower, Dipsy the dip-buyer, Momo the momentum chaser, HODL the buy-and-holder, and Flip the fast SMA-flipper) race each other on a real ticker. History replays at about two seconds per trading day, and the equity chart, price candlesticks, and leaderboard all update live.
+
+You can add your own fighter too. Write a buy rule and a sell rule using a small, safe expression language. There's no `eval` anywhere; rules go through a whitelisted parser in `backend/rules.py`. A few examples:
+
+- Dip buyer: buy `RSI(14) < 30 AND CLOSE > SMA(200)`, sell `RSI(14) > 70`
+- Trend follower: buy `SMA(20) > SMA(50)`, sell `SMA(20) < SMA(50)`
+- Buy and hold: buy `CLOSE > 0`, sell `CLOSE < 0`
+
+The indicators you can use are `CLOSE`, `SMA(n)`, `EMA(n)`, `RSI(n)`, and `MOM(n)`, combined with `AND`, `OR`, and the comparisons `< > <= >=`. The in-app cheat sheet has the full grammar and click-to-fill examples.
+
+## Lab tab: backtest a strategy on history
+
+Pick a ticker and date range, choose a built-in strategy (Buy and Hold, SMA Crossover, RSI Mean Reversion, Bollinger Bands, or Momentum) or write custom rules with the same language as the Arena. You get a candlestick price chart with your buy and sell points marked, an equity curve against buy and hold, a drawdown chart, a monthly returns heatmap, and the key metrics below.
+
+## Analysis tab: go beyond a single backtest
+
+Three tools that come up in real quant interviews:
+
+**Parameter optimizer.** Instead of guessing whether SMA(10, 50) or SMA(20, 100) is better, grid-search a range of values and read off a heatmap of which combination maximized Sharpe ratio (or CAGR, Calmar, and so on). The UI is upfront about the catch: a parameter that looks great on this data may just be overfit to it.
+
+**Walk-forward validation.** This is the honest way to check whether an optimization was real. Split the date range into folds, tune parameters on each training window, then test on the next window the tuner never saw. The equity curve it shows is purely out of sample.
+
+**Monte Carlo simulation.** Reshuffle the strategy's actual daily returns thousands of times to show the range of outcomes it could have produced. It answers whether a track record is repeatable or just lucky, with percentile bands and a plain-English probability of loss. It isn't a forecast of the future. It measures how much the result depended on the exact order of good and bad days.
+
+## Regime tab: market regime detection with explanations
+
+This is the part I'm most proud of, because it goes past a standard backtest.
+
+It classifies each trading day into one of four market regimes (Trending, Mean-Reverting, High-Volatility, or Choppy) by computing five rolling statistical features from price data:
+
+| Feature | What it measures |
+|---|---|
+| `vol_20` | 20-day annualized volatility, or how wildly prices are swinging |
+| `trend_20` | Directional slope of prices over 20 days |
+| `autocorr_10` | Lag-1 autocorrelation: do today's gains predict tomorrow's, or reverse them? |
+| `hurst` | Hurst exponent: above 0.5 trends, below 0.5 mean-reverts, near 0.5 is a random walk |
+| `drawdown_20` | Current distance below the recent 20-day peak |
+
+There's no `.fit()` call here and no learned weights. Classification uses a fixed affinity matrix built from domain knowledge, applied to rolling z-scores. Every regime call comes with the three features that drove it and a reason in plain English, for example "autocorr_10 = +0.42 (positive momentum autocorrelation)". The explainability is the point; anyone can call a black-box classifier.
+
+The regime-gated backtest ties the detector into the rest of Bullpen. Run any built-in strategy, but only take positions when the detector says the market is in a chosen regime. The UI reports what fraction of days the strategy was active and whether filtering actually improved risk-adjusted returns.
+
+A few limitations worth being honest about:
+
+- Regime labels are heuristic, not ground truth. There's no universal definition of "trending," so treat the labels as input to your judgment, not a verdict.
+- Features are computed on the same asset being traded, so at daily resolution there's a small lookahead risk. The regime for day T uses day T's close, and Bullpen only acts on it from day T+1.
+- Regime-gating trades on fewer days, which can shrink drawdowns just by trading less. Compare against unfiltered buy and hold, not only the unfiltered strategy.
+
+## Compare tab: line up several tickers
+
+Run one strategy across up to six tickers at once on a shared date range. You get all their equity curves on one chart, a summary metrics table, and a return-correlation heatmap that shows how closely each pair moves together day to day. Low correlations are the ones that actually diversify risk.
+
+## The metrics, in plain English
+
+- **Total return:** how much you made versus just holding your starting cash.
+- **Buy and hold return:** what doing nothing clever would have earned. If you can't beat this, the strategy isn't worth it.
+- **CAGR:** the same return expressed as a steady percent per year.
+- **Sharpe ratio:** return per unit of risk. Rough guide: above 1 is good, above 2 is great, above 3 and you should check for a bug.
+- **Sortino ratio:** like Sharpe, but it only penalizes downside swings, not the upside ones you actually want.
+- **Max drawdown:** the worst peak-to-bottom loss along the way. The "could you stomach this?" number.
+- **Calmar ratio:** annual return divided by that worst drawdown.
+- **Win rate:** the percent of trades that made money.
+
+## One detail that makes this legit: no lookahead bias
+
+A signal computed from today's close can only be traded tomorrow. The engine shifts every position forward one day (see `backtest.py`). Backtests that skip this step look amazing and are completely fake, so getting it right matters more than it seems.
+
+## What's inside
+
+| File | What it does |
+|---|---|
+| `backend/data.py` | Downloads prices for free, caches them, and falls back to synthetic data offline |
+| `backend/strategies.py` | Built-in strategies: Buy and Hold, SMA Crossover, RSI Mean Reversion, Bollinger Bands, Momentum |
+| `backend/rules.py` | Safe parser for user-written buy and sell rules, with no `eval` or `exec` |
+| `backend/backtest.py` | The engine: simulates trading and computes Sharpe, Sortino, Calmar, drawdown, and win rate |
+| `backend/analysis.py` | Parameter optimizer, walk-forward validation, and Monte Carlo simulation |
+| `backend/regime.py` | Market regime detector: rolling features, affinity-matrix classifier, feature attributions |
+| `backend/arena.py` | The live arena: replay clock, default fighters, leaderboard, agent persistence |
+| `backend/main.py` | FastAPI server and all JSON API endpoints |
+| `frontend/index.html` | The web UI: Arena, Lab, Analysis, Regime, and Compare tabs, built with Chart.js and vanilla JS |
+| `backend/test_bullpen.py` | Plain-Python test suite, run with `python backend/test_bullpen.py` |
+
+## Roadmap
+
+1. ~~Backtesting engine and web UI~~ (done)
+2. ~~Custom strategy rule language~~ (done)
+3. ~~Live arena with leaderboard~~ (done)
+4. ~~Free deploy on the Render free tier~~ (done)
+5. ~~Parameter optimizer, walk-forward validation, and Monte Carlo simulation~~ (done)
+6. ~~Market regime detector with explainability and regime-gated backtesting~~ (done)
+7. ~~Candlestick charts, volume, and a multi-ticker correlation heatmap~~ (done)

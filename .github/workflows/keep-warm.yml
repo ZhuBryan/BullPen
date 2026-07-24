@@ -1,0 +1,31 @@
+name: Keep the app warm
+
+# Pings the deployed site on a schedule so Render's free tier never goes to
+# sleep. That way visitors get an instant load instead of waiting ~1 minute
+# for a cold start to wake the server up.
+#
+# SETUP (one line to change): after you deploy and know your live URL, either
+#   - edit the FALLBACK_URL below to your real Render URL, or
+#   - go to the repo's Settings > Secrets and variables > Actions > Variables
+#     and add a variable named APP_URL set to your live URL (takes priority).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes, UTC (GitHub may delay a few min)
+  workflow_dispatch:          # also lets you run it by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the site
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          FALLBACK_URL: "https://bullpen-858e.onrender.com"
+        run: |
+          URL="${APP_URL:-$FALLBACK_URL}"
+          echo "Pinging $URL"
+          # Never fail the job on a slow/cold response — we only care that the
+          # request lands and resets Render's idle timer.
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 90 "$URL" || echo "000")
+          echo "Got HTTP $code"

@@ -12,9 +12,26 @@ An incoming order sweeps the opposite side while prices cross, filling at the
 RESTING order's price (the resting order set the terms), and rests whatever
 remains. Market orders never rest — the remainder is cancelled.
 
+Two data-structure decisions, both made because the profiler said so
+(see bench.py, and the numbers in README.md):
+
+  * SORTED PRICE INDEX. Keeping only dicts of price -> queue forces an
+    interpreted max()/min() scan on every best-bid/ask lookup. bisect keeps a
+    sorted list alongside; insort/pop move memory in C, which beats a Python
+    loop by enough to matter even though both are nominally O(levels).
+
+  * LAZY CANCELLATION. Removing an order from the middle of its queue is an
+    O(queue) scan, and deque random access makes it worse. Profiling showed
+    cancels at a 82us median against 2.4us for limits — 34x, on 15% of the
+    traffic. So cancels now just flag the order and decrement a live counter;
+    the flagged husk is skipped when matching reaches it. This is what real
+    exchanges do, and it is why a per-level live count exists: without it a
+    level holding nothing but cancelled husks would still advertise a price.
+
 Run `python orderbook.py` to execute the self-check.
 """
 
+from bisect import bisect_left, insort
 from collections import deque
 from dataclasses import dataclass
 
@@ -28,29 +45,47 @@ class Order:
     price: int | None  # None = market order
     qty: int
     remaining: int
+    cancelled: bool = False
 
 
 class Book:
     def __init__(self):
         self.bids: dict[int, deque[Order]] = {}  # price -> FIFO queue
         self.asks: dict[int, deque[Order]] = {}
-        self.orders: dict[int, Order] = {}       # id -> order, for O(1) cancel lookup
+        self.orders: dict[int, Order] = {}       # id -> order, O(1) cancel lookup
         self.events: list[tuple] = []
         self._next_id = 1
+        self._bid_prices: list[int] = []         # sorted ascending
+        self._ask_prices: list[int] = []
+        self._bid_live: dict[int, int] = {}      # price -> live (uncancelled) orders
+        self._ask_live: dict[int, int] = {}
+
+    # ---- level bookkeeping ---------------------------------------------
+    def _levels(self, side):
+        if side == BUY:
+            return self.bids, self._bid_prices, self._bid_live
+        return self.asks, self._ask_prices, self._ask_live
+
+    def _del_level(self, side, price):
+        book, prices, live = self._levels(side)
+        book.pop(price, None)
+        live.pop(price, None)
+        i = bisect_left(prices, price)
+        if i < len(prices) and prices[i] == price:
+            prices.pop(i)
 
     # ---- introspection -------------------------------------------------
-    # ponytail: max()/min() is O(levels) per call. Fine to thousands of levels;
-    # swap for a heap or flat tick-indexed array when benchmarking says so.
     def best_bid(self):
-        return max(self.bids) if self.bids else None
+        return self._bid_prices[-1] if self._bid_prices else None
 
     def best_ask(self):
-        return min(self.asks) if self.asks else None
+        return self._ask_prices[0] if self._ask_prices else None
 
     def depth(self, side, levels=5):
-        book = self.bids if side == BUY else self.asks
-        prices = sorted(book, reverse=(side == BUY))[:levels]
-        return [(p, sum(o.remaining for o in book[p])) for p in prices]
+        book, prices, _ = self._levels(side)
+        chosen = prices[::-1][:levels] if side == BUY else prices[:levels]
+        return [(p, sum(o.remaining for o in book[p] if not o.cancelled))
+                for p in chosen]
 
     # ---- commands ------------------------------------------------------
     def limit(self, side, price, qty):
@@ -64,17 +99,12 @@ class Book:
         if o is None:
             self.events.append(("reject_cancel", order_id))
             return False
-        book = self.bids if o.side == BUY else self.asks
-        level = book.get(o.price)
-        if level:
-            # ponytail: O(level size) removal. Intrusive linked list is the
-            # upgrade if cancel-heavy workloads show up in the profile.
-            try:
-                level.remove(o)
-            except ValueError:
-                pass
-            if not level:
-                del book[o.price]
+        o.cancelled = True
+        _, _, live = self._levels(o.side)
+        if o.price in live:
+            live[o.price] -= 1
+            if live[o.price] <= 0:
+                self._del_level(o.side, o.price)
         self.events.append(("canceled", order_id, o.remaining))
         return True
 
@@ -91,10 +121,18 @@ class Book:
                 self.events.append(("canceled", o.id, o.remaining))  # unfilled market qty
                 o.remaining = 0
             else:
-                book = self.bids if side == BUY else self.asks
-                book.setdefault(price, deque()).append(o)
-                self.orders[o.id] = o
+                self._rest(o)
         return o.id
+
+    def _rest(self, o):
+        book, prices, live = self._levels(o.side)
+        if o.price not in book:
+            book[o.price] = deque()
+            live[o.price] = 0
+            insort(prices, o.price)
+        book[o.price].append(o)
+        live[o.price] += 1
+        self.orders[o.id] = o
 
     def _crosses(self, o, best):
         if best is None:
@@ -104,7 +142,8 @@ class Book:
         return o.price >= best if o.side == BUY else o.price <= best
 
     def _match(self, o):
-        opp = self.asks if o.side == BUY else self.bids
+        opp_side = SELL if o.side == BUY else BUY
+        opp, _, live = self._levels(opp_side)
         while o.remaining:
             best = self.best_ask() if o.side == BUY else self.best_bid()
             if not self._crosses(o, best):
@@ -112,15 +151,19 @@ class Book:
             level = opp[best]
             while o.remaining and level:
                 resting = level[0]
+                if resting.cancelled:     # husk left by a lazy cancel
+                    level.popleft()
+                    continue
                 traded = min(o.remaining, resting.remaining)
                 o.remaining -= traded
                 resting.remaining -= traded
                 self.events.append(("trade", best, traded, o.id, resting.id))
                 if resting.remaining == 0:
                     level.popleft()
+                    live[best] -= 1
                     self.orders.pop(resting.id, None)
-            if not level:
-                del opp[best]
+            if live.get(best, 0) <= 0:
+                self._del_level(opp_side, best)
 
 
 # ---------------------------------------------------------------------------
@@ -129,12 +172,18 @@ class Book:
 def _check_invariants(b):
     bb, ba = b.best_bid(), b.best_ask()
     assert bb is None or ba is None or bb < ba, f"crossed book: {bb} >= {ba}"
-    for book in (b.bids, b.asks):
+    for side in (BUY, SELL):
+        book, prices, live = b._levels(side)
+        assert prices == sorted(book), f"{side} price index out of sync"
         for price, level in book.items():
-            assert level, f"empty level left at {price}"
+            actual = sum(1 for o in level if not o.cancelled)
+            assert live[price] == actual, (
+                f"live count wrong at {price}: {live[price]} != {actual}")
+            assert actual > 0, f"level {price} advertised with no live orders"
             for o in level:
-                assert o.remaining > 0, "fully filled order still resting"
-                assert b.orders.get(o.id) is o, "resting order missing from index"
+                if not o.cancelled:
+                    assert o.remaining > 0, "fully filled order still resting"
+                    assert b.orders.get(o.id) is o, "resting order missing from index"
 
 
 def demo():
@@ -195,6 +244,34 @@ def demo():
     assert b.cancel(oid) is True
     assert b.best_ask() is None
     assert b.cancel(oid) is False, "double cancel must fail"
+    _check_invariants(b)
+
+    # lazy cancellation must not leave a phantom price level
+    b = Book()
+    a = b.limit(BUY, 100, 5)
+    c = b.limit(BUY, 100, 5)
+    b.cancel(a)
+    assert b.best_bid() == 100, "level still has a live order"
+    b.cancel(c)
+    assert b.best_bid() is None, "phantom level: all orders cancelled"
+    _check_invariants(b)
+
+    # a cancelled husk must be skipped, not filled
+    b = Book()
+    dead = b.limit(SELL, 100, 5)
+    alive = b.limit(SELL, 100, 5)
+    b.cancel(dead)
+    b.limit(BUY, 100, 5)
+    trades = [e for e in b.events if e[0] == "trade"]
+    assert len(trades) == 1 and trades[0][4] == alive, "filled a cancelled order"
+    _check_invariants(b)
+
+    # re-resting at a price whose level was fully cancelled
+    b = Book()
+    x = b.limit(BUY, 100, 5)
+    b.cancel(x)
+    b.limit(BUY, 100, 7)
+    assert b.best_bid() == 100 and b.depth(BUY)[0] == (100, 7)
     _check_invariants(b)
 
     # share conservation over a randomized stream

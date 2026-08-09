@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from backend.ai import AIError, translate as ai_translate
 from backend.analysis import optimize_strategy, walk_forward, monte_carlo
 from backend.arena import get_arena
 from backend.backtest import run_backtest
@@ -46,6 +47,14 @@ class RegimeRequest(BaseModel):
 class RulesValidateRequest(BaseModel):
     buy_rule: str = ""
     sell_rule: str = ""
+
+
+class AITranslateRequest(BaseModel):
+    description: str = ""
+    provider: str = "openai"       # openai | anthropic | gemini | local
+    api_key: str = ""              # used in memory only, never stored or logged
+    model: str = ""               # optional; sensible default per provider
+    base_url: str = ""            # for local / OpenAI-compatible servers
 
 
 class AgentCreateRequest(BaseModel):
@@ -262,6 +271,29 @@ def rules_validate(req: RulesValidateRequest):
     if ok:
         return {"valid": True}
     return {"valid": False, "error": err}
+
+
+@app.post("/api/ai/translate")
+def ai_translate_endpoint(req: AITranslateRequest):
+    """
+    Turn a plain-English strategy description into validated buy/sell rules.
+
+    The API key is used only for this single request and is never stored or
+    logged. The model's output is checked by the same whitelisted parser that
+    powers custom strategies, so nothing unsafe can slip through.
+    """
+    try:
+        result = ai_translate(
+            description=req.description,
+            provider=req.provider,
+            api_key=req.api_key,
+            model=req.model,
+            base_url=req.base_url,
+        )
+        return {"ok": True, **result}
+    except AIError as e:
+        # 200 with ok:false keeps the frontend logic simple (like rules/validate).
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/arena/state")

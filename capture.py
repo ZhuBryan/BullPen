@@ -138,7 +138,13 @@ async def record(symbol="BTCUSDT", seconds=60, outdir="data"):
     import websockets  # pip install websockets
 
     sym = symbol.upper()
-    url = f"wss://stream.binance.com:9443/ws/{sym.lower()}@depth@100ms"
+    low = sym.lower()
+    # Combined stream: depth diffs AND trades. Trades are not optional extra —
+    # depth alone cannot tell you whether a level shrank because someone traded
+    # (consumes the front of the queue) or someone cancelled (does not). Without
+    # that distinction, queue-position fill modelling is guesswork.
+    url = (f"wss://stream.binance.com:9443/stream?streams="
+           f"{low}@depth@100ms/{low}@trade")
     snap_url = f"https://api.binance.com/api/v3/depth?symbol={sym}&limit=1000"
     out = f"{outdir}/{sym}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl.gz"
 
@@ -153,9 +159,18 @@ async def record(symbol="BTCUSDT", seconds=60, outdir="data"):
         writer.write({"type": "snapshot", "ts": time.time(), **snap})
 
         while time.time() < deadline:
-            ev = json.loads(await ws.recv())
-            status = stream.apply_event(ev)
-            writer.write({"type": "diff", "ts": time.time(), "status": status, **ev})
+            msg = json.loads(await ws.recv())
+            data = msg.get("data", msg)
+
+            if data.get("e") == "trade":
+                writer.write({"type": "trade", "ts": time.time(),
+                              "p": data["p"], "q": data["q"],
+                              "m": data["m"],  # True = buyer is the maker (sell aggressor)
+                              "T": data["T"]})
+                continue
+
+            status = stream.apply_event(data)
+            writer.write({"type": "diff", "ts": time.time(), "status": status, **data})
             if status == GAP:
                 # Resync rather than keep a book we know is wrong.
                 print("gap detected — resyncing")

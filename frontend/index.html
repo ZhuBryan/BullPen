@@ -6,7 +6,7 @@
 <title>Bullpen — Trading Arena &amp; Backtester</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
@@ -37,7 +37,7 @@
 }
 *{box-sizing:border-box;margin:0;}
 html{color-scheme:dark;}
-body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;position:relative;min-height:100vh;}
+body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;position:relative;min-height:100vh;}
 
 /* Signature "terminal" backdrop: a faint grid that fades out downward, plus a
    soft electric-blue glow up top. Fixed so it never scrolls. */
@@ -146,6 +146,18 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .vol-box{height:62px;margin-top:4px;}
 .vol-label{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:0.06em;margin-top:6px;}
 .corr-note{font-size:12px;color:var(--muted);margin-bottom:12px;}
+
+/* ---- AI strategy composer ---- */
+.ai-card{border-color:var(--border2);}
+.ai-desc{width:100%;min-height:76px;resize:vertical;line-height:1.55;padding:9px 11px;}
+.ai-hint{font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;}
+.ai-err{color:var(--red);font-size:12px;margin-top:10px;display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:6px;padding:7px 10px;}
+.ai-rules{margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);display:none;}
+.ai-ok{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:600;margin-bottom:10px;}
+.ai-rule{display:flex;gap:8px;align-items:baseline;margin-bottom:7px;}
+.ai-rule .rtag{flex:0 0 auto;width:34px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.04em;padding-top:2px;}
+.ai-rule .rtag.buy{color:var(--green);} .ai-rule .rtag.sell{color:var(--red);}
+.ai-rule code{flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 9px;line-height:1.5;word-break:break-word;}
 
 /* ---- Leaderboard table ---- */
 .lb-table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -408,6 +420,42 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
   <div class="tab-body">
 
     <div class="sidebar">
+      <div class="card ai-card">
+        <p class="label">Describe with AI</p>
+        <div class="field" style="margin-bottom:10px">
+          <label for="aiDesc">Your strategy, in plain English</label>
+          <textarea id="aiDesc" class="ai-desc" spellcheck="false" placeholder="e.g. Buy when it looks oversold but is still in a long-term uptrend, and sell once it gets overbought."></textarea>
+        </div>
+        <div class="field" style="margin-bottom:8px">
+          <label for="aiProvider">Model</label>
+          <select id="aiProvider">
+            <option value="anthropic">Claude (Anthropic)</option>
+            <option value="openai">GPT (OpenAI)</option>
+            <option value="gemini">Gemini (Google)</option>
+            <option value="local">Local (Ollama)</option>
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:8px" id="aiKeyField">
+          <label for="aiKey">API key <span class="ai-hint">— kept in this browser only</span></label>
+          <input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key">
+        </div>
+        <div class="field" style="margin-bottom:8px;display:none" id="aiBaseField">
+          <label for="aiBaseUrl">Local server URL</label>
+          <input id="aiBaseUrl" spellcheck="false" placeholder="http://localhost:11434/v1">
+        </div>
+        <div class="field">
+          <label for="aiModel">Model name <span class="ai-hint">— optional</span></label>
+          <input id="aiModel" spellcheck="false" placeholder="provider default">
+        </div>
+        <button id="aiBtn" onclick="aiGenerate()" style="margin-top:14px;width:100%">Generate &amp; backtest</button>
+        <p id="aiErr" class="ai-err"></p>
+        <div id="aiRules" class="ai-rules" aria-live="polite">
+          <div class="ai-ok"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span>Translated to safe rules, validated</span></div>
+          <div class="ai-rule"><span class="rtag buy">BUY</span><code id="aiBuyOut"></code></div>
+          <div class="ai-rule"><span class="rtag sell">SELL</span><code id="aiSellOut"></code></div>
+          <p id="aiExplain" class="sub" style="font-size:12px;margin-top:8px"></p>
+        </div>
+      </div>
       <div class="card">
         <p class="label">Backtest</p>
         <div class="field" style="margin-bottom:12px"><label>Ticker</label><input id="ticker" value="AAPL"></div>
@@ -1354,6 +1402,82 @@ async function runBacktest() {
   finally { btn.disabled = false; btn.textContent = 'Run Backtest'; }
 }
 
+/* =====================================================================
+   AI STRATEGY COMPOSER — plain English -> validated rules -> backtest
+   The key lives only in this browser (localStorage) and is sent to the
+   backend per request, which uses it in memory and never stores it.
+   ===================================================================== */
+function aiKeyName(p) { return 'bullpen_ai_key_' + p; }
+
+function aiInit() {
+  const prov = document.getElementById('aiProvider');
+  if (!prov) return;
+  let saved = 'anthropic';
+  try { saved = localStorage.getItem('bullpen_ai_provider') || 'anthropic'; } catch (e) {}
+  prov.value = saved;
+  aiSyncProvider();
+  prov.addEventListener('change', () => {
+    try { localStorage.setItem('bullpen_ai_provider', prov.value); } catch (e) {}
+    aiSyncProvider();
+  });
+  document.getElementById('aiKey').addEventListener('input', e => {
+    try { localStorage.setItem(aiKeyName(prov.value), e.target.value); } catch (err) {}
+  });
+}
+
+// Show the right inputs for the chosen provider and load its saved key.
+function aiSyncProvider() {
+  const p = document.getElementById('aiProvider').value;
+  const isLocal = p === 'local';
+  document.getElementById('aiKeyField').style.display  = isLocal ? 'none' : 'block';
+  document.getElementById('aiBaseField').style.display = isLocal ? 'block' : 'none';
+  let key = '';
+  try { key = localStorage.getItem(aiKeyName(p)) || ''; } catch (e) {}
+  document.getElementById('aiKey').value = key;
+}
+
+async function aiGenerate() {
+  const btn = document.getElementById('aiBtn');
+  const err = document.getElementById('aiErr');
+  const desc = document.getElementById('aiDesc').value.trim();
+  err.style.display = 'none';
+  if (!desc) { err.textContent = 'Describe the strategy first.'; err.style.display = 'block'; return; }
+
+  const provider = document.getElementById('aiProvider').value;
+  const body = {
+    description: desc, provider,
+    api_key:  document.getElementById('aiKey').value.trim(),
+    model:    document.getElementById('aiModel').value.trim(),
+    base_url: document.getElementById('aiBaseUrl').value.trim(),
+  };
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {
+    const res = await fetch('/api/ai/translate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not translate that description.');
+
+    // Drop the generated rules into the custom-strategy inputs and switch to it.
+    const sel = document.getElementById('strategy');
+    sel.value = 'custom'; renderParams();
+    document.getElementById('labBuy').value  = data.buy_rule;
+    document.getElementById('labSell').value = data.sell_rule;
+    document.getElementById('labBuy').dispatchEvent(new Event('input'));
+
+    // Surface the validated rules in the composer, then run the backtest.
+    document.getElementById('aiBuyOut').textContent  = data.buy_rule;
+    document.getElementById('aiSellOut').textContent = data.sell_rule;
+    document.getElementById('aiExplain').textContent = data.explanation || '';
+    document.getElementById('aiRules').style.display = 'block';
+    runBacktest();
+  } catch (e) {
+    err.textContent = e.message; err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Generate & backtest';
+  }
+}
+
 function render(r) {
   document.getElementById('results').style.display       = 'flex';
   document.getElementById('labPlaceholder').style.display = 'none';
@@ -2221,6 +2345,7 @@ showArenaMessage('Connecting to the arena…');
 pollArena();
 setInterval(pollArena, 2000);
 initLab();
+aiInit();
 </script>
 </body>
 </html>

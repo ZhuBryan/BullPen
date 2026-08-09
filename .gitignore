@@ -17,3 +17,6 @@ HANDOFF.md
 *.swp
 .idea/
 .vscode/
+
+# Separate project, has its own git repo
+nanoex/

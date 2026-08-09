@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bullpen — Design Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   GLOBAL SCALE (shared across all directions — the system's backbone)
+   ===================================================================== */
+:root{
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px; --s9:56px;
+  --t-xs:11px; --t-sm:12px; --t-base:13px; --t-md:14px; --t-lg:16px; --t-xl:20px; --t-2xl:26px; --t-3xl:34px;
+}
+*{box-sizing:border-box;margin:0;}
+html{color-scheme:dark;}
+body{font-family:var(--font-ui);background:var(--bg);color:var(--text-1);font-size:var(--t-base);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+h1,h2,h3{font-weight:600;letter-spacing:-0.01em;}
+button{font-family:inherit;cursor:pointer;}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
+
+/* =====================================================================
+   DIRECTION TOKENS — each theme overrides the same variables
+   ===================================================================== */
+
+/* ---- ONYX: dense quant terminal, cool near-black, teal signal ---- */
+[data-theme="onyx"]{
+  --bg:oklch(16% 0.008 250); --surface-1:oklch(19.5% 0.01 250); --surface-2:oklch(23% 0.012 250); --surface-3:oklch(27% 0.014 250);
+  --border:oklch(29% 0.014 250); --border-strong:oklch(38% 0.02 250);
+  --text-1:oklch(93% 0.008 250); --text-2:oklch(70% 0.014 250); --text-3:oklch(55% 0.018 250);
+  --accent:oklch(78% 0.13 195); --accent-ink:oklch(18% 0.03 220); --accent-weak:oklch(30% 0.05 200);
+  --up:oklch(78% 0.16 155); --down:oklch(68% 0.19 25);
+  --font-ui:'Manrope',system-ui,sans-serif; --font-mono:'JetBrains Mono',monospace;
+  --radius:4px; --radius-sm:3px; --pad-card:var(--s3); --gap:var(--s3);
+  --shadow:0 1px 0 oklch(12% 0.01 250); --card-bg:var(--surface-1);
+  --grid-line:oklch(100% 0 0 / 0.02);
+}
+/* ---- COBALT: spacious Linear/Vercel, indigo-charcoal, electric blue ---- */
+[data-theme="cobalt"]{
+  --bg:oklch(15.5% 0.02 265); --surface-1:oklch(18.5% 0.024 265); --surface-2:oklch(22% 0.03 265); --surface-3:oklch(26% 0.034 265);
+  --border:oklch(29% 0.03 265); --border-strong:oklch(40% 0.04 265);
+  --text-1:oklch(95% 0.006 265); --text-2:oklch(74% 0.02 265); --text-3:oklch(58% 0.03 265);
+  --accent:oklch(64% 0.18 262); --accent-ink:oklch(98% 0.01 262); --accent-weak:oklch(34% 0.09 262);
+  --up:oklch(76% 0.17 152); --down:oklch(66% 0.2 22);
+  --font-ui:'Manrope',system-ui,sans-serif; --font-mono:'JetBrains Mono',monospace;
+  --radius:12px; --radius-sm:8px; --pad-card:var(--s5); --gap:var(--s5);
+  --shadow:0 8px 30px -12px oklch(0% 0 0 / 0.7); --card-bg:linear-gradient(180deg,var(--surface-1),oklch(16.5% 0.02 265));
+  --grid-line:oklch(100% 0 0 / 0.03);
+}
+/* ---- DAYLIGHT: light, professional, approachable, deep-blue accent ---- */
+[data-theme="daylight"]{
+  --bg:oklch(97% 0.004 255); --surface-1:oklch(100% 0 0); --surface-2:oklch(96.5% 0.005 255); --surface-3:oklch(93.5% 0.008 255);
+  --border:oklch(90% 0.008 255); --border-strong:oklch(82% 0.012 255);
+  --text-1:oklch(27% 0.02 262); --text-2:oklch(46% 0.02 262); --text-3:oklch(60% 0.02 262);
+  --accent:oklch(52% 0.16 258); --accent-ink:oklch(99% 0.01 258); --accent-weak:oklch(93% 0.04 258);
+  --up:oklch(56% 0.15 152); --down:oklch(55% 0.2 25);
+  --font-ui:'Manrope',system-ui,sans-serif; --font-mono:'JetBrains Mono',monospace;
+  --radius:10px; --radius-sm:7px; --pad-card:var(--s5); --gap:var(--s5);
+  --shadow:0 4px 16px -8px oklch(50% 0.05 258 / 0.25); --card-bg:var(--surface-1);
+  --grid-line:oklch(0% 0 0 / 0.04);
+}
+[data-theme="daylight"]{color-scheme:light;}
+
+/* =====================================================================
+   HARNESS — the meta chrome for switching directions (not the design)
+   ===================================================================== */
+.harness{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:var(--s4);
+  padding:var(--s3) var(--s5);background:oklch(12% 0.01 260);border-bottom:1px solid oklch(28% 0.02 260);
+  color:oklch(70% 0.02 260);font-family:'JetBrains Mono',monospace;font-size:var(--t-sm);}
+.harness .h-title{color:oklch(88% 0.02 260);font-weight:600;letter-spacing:0.04em;}
+.harness .h-dot{width:6px;height:6px;border-radius:50%;background:oklch(78% 0.16 155);box-shadow:0 0 8px oklch(78% 0.16 155);}
+.switcher{display:inline-flex;background:oklch(17% 0.015 260);border:1px solid oklch(30% 0.02 260);border-radius:8px;padding:3px;gap:2px;}
+.switcher button{border:none;background:transparent;color:oklch(65% 0.02 260);padding:5px 14px;border-radius:6px;font-family:inherit;font-size:var(--t-sm);font-weight:500;transition:background .2s,color .2s;}
+.switcher button:hover{color:oklch(92% 0.02 260);}
+.switcher button[aria-pressed="true"]{background:oklch(26% 0.03 260);color:oklch(96% 0.01 260);}
+.harness .h-desc{margin-left:auto;color:oklch(58% 0.02 260);font-size:var(--t-sm);}
+
+/* =====================================================================
+   APP SHELL COMPONENTS (styled entirely from tokens)
+   ===================================================================== */
+.app{min-height:calc(100vh - 49px);}
+.topbar{display:flex;align-items:center;gap:var(--s2);height:56px;padding:0 var(--s5);
+  border-bottom:1px solid var(--border);background:var(--surface-1);}
+.brand{display:flex;align-items:center;gap:var(--s3);padding-right:var(--s5);margin-right:var(--s3);border-right:1px solid var(--border);}
+.brand .logo{width:28px;height:28px;border-radius:var(--radius-sm);display:grid;place-items:center;
+  background:var(--surface-3);border:1px solid var(--border-strong);}
+.brand .name{font-weight:700;font-size:var(--t-lg);letter-spacing:-0.02em;}
+.nav{display:flex;gap:2px;}
+.nav a{position:relative;display:flex;align-items:center;height:56px;padding:0 var(--s4);color:var(--text-3);
+  text-decoration:none;font-weight:500;font-size:var(--t-md);transition:color .2s,background .2s;border-radius:var(--radius-sm) var(--radius-sm) 0 0;}
+.nav a:hover{color:var(--text-1);background:color-mix(in oklch,var(--text-1) 6%,transparent);}
+.nav a[aria-current="page"]{color:var(--text-1);}
+.nav a[aria-current="page"]::after{content:"";position:absolute;left:var(--s3);right:var(--s3);bottom:-1px;height:2px;
+  background:var(--accent);border-radius:2px;}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:var(--s3);}
+.pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:var(--t-xs);font-weight:500;
+  text-transform:uppercase;letter-spacing:0.06em;color:var(--text-2);background:var(--surface-2);
+  border:1px solid var(--border);border-radius:100px;padding:5px 11px;}
+.pill .live{width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 7px var(--up);}
+.icon-btn{width:32px;height:32px;display:grid;place-items:center;border-radius:var(--radius-sm);border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text-2);transition:color .2s,border-color .2s;}
+.icon-btn:hover{color:var(--text-1);border-color:var(--border-strong);}
+
+/* context strip */
+.context{display:flex;align-items:center;gap:var(--s5);height:40px;padding:0 var(--s5);
+  border-bottom:1px solid var(--border);background:var(--bg);font-family:var(--font-mono);font-size:var(--t-sm);color:var(--text-2);}
+.context b{color:var(--text-1);font-weight:600;}
+.context .sep{width:1px;height:14px;background:var(--border);}
+.context .chg-pos{color:var(--up);} .context .chg-neg{color:var(--down);}
+
+/* layout */
+.workspace{display:grid;grid-template-columns:340px 1fr;gap:var(--gap);padding:var(--s6) var(--s5);max-width:1360px;margin:0 auto;align-items:start;}
+.col{display:flex;flex-direction:column;gap:var(--gap);min-width:0;}
+
+/* cards */
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--pad-card);border-bottom:1px solid var(--border);}
+.card-h h2,.card-h h3{font-size:var(--t-md);}
+.card-b{padding:var(--pad-card);}
+.eyebrow{font-size:var(--t-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-3);}
+
+/* segmented control */
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;gap:2px;width:100%;}
+.seg button{flex:1;border:none;background:transparent;color:var(--text-3);padding:7px 10px;border-radius:calc(var(--radius-sm) - 2px);
+  font-family:inherit;font-weight:600;font-size:var(--t-sm);transition:background .2s,color .2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.seg button:hover{color:var(--text-1);}
+.seg button[aria-pressed="true"]{background:var(--surface-3);color:var(--text-1);box-shadow:var(--shadow);}
+.seg.mini{width:auto;}
+.seg.mini button{flex:0 0 auto;padding:5px 12px;}
+
+/* AI composer */
+.composer label.field-label{display:block;font-size:var(--t-sm);font-weight:600;color:var(--text-2);margin-bottom:var(--s2);}
+.composer textarea{width:100%;min-height:88px;resize:vertical;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text-1);font-family:var(--font-ui);font-size:var(--t-md);line-height:1.55;padding:var(--s3);transition:border-color .2s,box-shadow .2s;}
+.composer textarea::placeholder{color:var(--text-3);}
+.composer textarea:hover{border-color:var(--border-strong);}
+.composer textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak);}
+.model-row{display:flex;gap:var(--s2);margin-top:var(--s3);}
+.select{position:relative;flex:1;}
+.select select{appearance:none;width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);
+  color:var(--text-1);font-family:var(--font-ui);font-size:var(--t-sm);font-weight:500;padding:8px 30px 8px 10px;transition:border-color .2s;}
+.select select:hover{border-color:var(--border-strong);}
+.select select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak);}
+.select .caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);}
+.key-btn{white-space:nowrap;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm);
+  padding:8px 12px;font-size:var(--t-sm);font-weight:500;display:inline-flex;align-items:center;gap:6px;transition:color .2s,border-color .2s;}
+.key-btn:hover{color:var(--text-1);border-color:var(--border-strong);}
+.key-btn .ok{color:var(--up);}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);height:40px;padding:0 var(--s4);border-radius:var(--radius-sm);
+  border:1px solid transparent;font-weight:600;font-size:var(--t-md);transition:filter .2s,box-shadow .2s,transform .05s,background .2s;}
+.btn:active{transform:translateY(1px);}
+.btn-primary{width:100%;margin-top:var(--s4);background:var(--accent);color:var(--accent-ink);
+  box-shadow:0 2px 14px -4px color-mix(in oklch,var(--accent) 70%,transparent);}
+.btn-primary:hover{filter:brightness(1.06);box-shadow:0 6px 20px -5px color-mix(in oklch,var(--accent) 70%,transparent);}
+.btn-ghost{background:var(--surface-2);border-color:var(--border);color:var(--text-1);}
+.btn-ghost:hover{border-color:var(--border-strong);background:var(--surface-3);}
+
+/* generated rules */
+.rules{margin-top:var(--s4);padding-top:var(--s4);border-top:1px dashed var(--border);}
+.rules .r-status{display:flex;align-items:center;gap:6px;font-size:var(--t-sm);color:var(--up);font-weight:600;margin-bottom:var(--s3);}
+.rule{display:flex;gap:var(--s2);align-items:baseline;margin-bottom:var(--s2);}
+.rule .tag{flex:0 0 auto;width:38px;font-family:var(--font-mono);font-size:var(--t-xs);font-weight:600;letter-spacing:0.04em;padding-top:2px;}
+.rule .tag.buy{color:var(--up);} .rule .tag.sell{color:var(--down);}
+.rule code{flex:1;font-family:var(--font-mono);font-size:var(--t-sm);color:var(--text-1);background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 9px;line-height:1.5;}
+
+/* KPI row */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--gap);}
+.kpi{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);box-shadow:var(--shadow);}
+.kpi .k-label{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);font-weight:600;margin-bottom:var(--s2);}
+.kpi .k-val{font-family:var(--font-mono);font-size:var(--t-2xl);font-weight:600;letter-spacing:-0.02em;line-height:1;}
+.kpi .k-sub{font-size:var(--t-xs);color:var(--text-3);margin-top:6px;font-family:var(--font-mono);}
+.pos{color:var(--up);} .neg{color:var(--down);}
+
+/* chart cards */
+.chart-title{display:flex;align-items:center;gap:var(--s3);}
+.chart-title .tkr{font-family:var(--font-mono);font-weight:600;color:var(--text-1);}
+.legend{display:flex;gap:var(--s4);font-size:var(--t-xs);color:var(--text-3);font-family:var(--font-mono);}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+.chart{width:100%;display:block;}
+.axis-note{font-size:var(--t-xs);color:var(--text-3);font-family:var(--font-mono);margin-top:var(--s2);}
+
+/* candlestick + equity svg element classes */
+.c-up{fill:var(--up);stroke:var(--up);}
+.c-down{fill:var(--down);stroke:var(--down);}
+.grid line{stroke:var(--grid-line);stroke-width:1;}
+.vol-up{fill:var(--up);opacity:.4;} .vol-down{fill:var(--down);opacity:.4;}
+.marker-buy{fill:var(--up);} .marker-sell{fill:var(--down);}
+.eq-strat{stroke:var(--accent);fill:none;stroke-width:2;}
+.eq-bh{stroke:var(--text-3);fill:none;stroke-width:1.5;stroke-dasharray:5 4;}
+.eq-area{fill:url(#eqfill);}
+.ylabel{fill:var(--text-3);font-family:var(--font-mono);font-size:10px;}
+
+@media(max-width:1080px){.workspace{grid-template-columns:1fr;}.kpis{grid-template-columns:repeat(2,1fr);}}
+</style>
+</head>
+<body>
+
+<!-- ===================== HARNESS (meta control) ===================== -->
+<div class="harness">
+  <span class="h-dot"></span>
+  <span class="h-title">BULLPEN / DESIGN DIRECTIONS</span>
+  <div class="switcher" role="group" aria-label="Choose a visual direction">
+    <button data-set="onyx" aria-pressed="true">Onyx</button>
+    <button data-set="cobalt" aria-pressed="false">Cobalt</button>
+    <button data-set="daylight" aria-pressed="false">Daylight</button>
+  </div>
+  <span class="h-desc" id="dirDesc">Dense quant terminal — cool near-black, teal signal, monospace-forward.</span>
+</div>
+
+<!-- ===================== APP (same markup, themed) ===================== -->
+<div class="app" data-theme="onyx" id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="5" width="2" height="7" rx="0.5" fill="var(--up)"/>
+          <rect x="1.4" y="3.4" width="0.9" height="2" fill="var(--up)"/><rect x="3.1" y="10.4" width="0.9" height="2.4" fill="var(--up)"/>
+          <rect x="7" y="3" width="2" height="6" rx="0.5" fill="var(--down)"/>
+          <rect x="6.4" y="1.6" width="0.9" height="2" fill="var(--down)"/><rect x="8.1" y="8.2" width="0.9" height="2.4" fill="var(--down)"/>
+          <rect x="12" y="4" width="2" height="8" rx="0.5" fill="var(--accent)"/>
+          <rect x="11.4" y="2.4" width="0.9" height="2" fill="var(--accent)"/><rect x="13.1" y="11.4" width="0.9" height="2.2" fill="var(--accent)"/>
+        </svg>
+      </span>
+      <span class="name">Bullpen</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <a href="#">Arena</a>
+      <a href="#" aria-current="page">Lab</a>
+      <a href="#">Analysis</a>
+      <a href="#">Regime</a>
+      <a href="#">Compare</a>
+    </nav>
+    <div class="top-right">
+      <span class="pill"><span class="live"></span>Paper</span>
+      <button class="icon-btn" aria-label="Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="context">
+    <span><b>AAPL</b> Apple Inc.</span>
+    <span class="sep"></span>
+    <span>184.20 <span class="chg-pos">+1.83 (+1.00%)</span></span>
+    <span class="sep"></span>
+    <span>2022-01-01 &rarr; 2025-01-01</span>
+    <span class="sep"></span>
+    <span>Daily &middot; Yahoo Finance</span>
+  </div>
+
+  <main class="workspace">
+    <!-- ============ LEFT: strategy + AI composer ============ -->
+    <aside class="col">
+      <section class="card composer" aria-label="Strategy">
+        <div class="card-h">
+          <h2>Strategy</h2>
+          <div class="seg mini" role="group" aria-label="Strategy source">
+            <button aria-pressed="false">Preset</button>
+            <button aria-pressed="true">Describe with AI</button>
+          </div>
+        </div>
+        <div class="card-b">
+          <label class="field-label" for="desc">Describe it in plain English</label>
+          <textarea id="desc" spellcheck="false">Buy when the stock looks oversold but is still in a long-term uptrend, and sell once it gets overbought.</textarea>
+
+          <div class="model-row">
+            <div class="select">
+              <select aria-label="Model provider">
+                <option>Claude (Anthropic)</option>
+                <option>GPT (OpenAI)</option>
+                <option>Gemini (Google)</option>
+                <option>Local — Ollama</option>
+              </select>
+              <span class="caret" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+              </span>
+            </div>
+            <button class="key-btn" type="button"><span class="ok">&#10003;</span> Key set</button>
+          </div>
+
+          <button class="btn btn-primary" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
+            Generate &amp; backtest
+          </button>
+
+          <div class="rules" aria-live="polite">
+            <div class="r-status">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+              Translated to safe rules, validated
+            </div>
+            <div class="rule"><span class="tag buy">BUY</span><code>RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)</code></div>
+            <div class="rule"><span class="tag sell">SELL</span><code>RSI(14) &gt; 70</code></div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ============ RIGHT: results ============ -->
+    <div class="col">
+      <section class="kpis" aria-label="Backtest metrics">
+        <div class="kpi"><div class="k-label">Return</div><div class="k-val pos">+42.3%</div><div class="k-sub">$14,230 final</div></div>
+        <div class="kpi"><div class="k-label">Buy &amp; hold</div><div class="k-val">+31.1%</div><div class="k-sub">benchmark</div></div>
+        <div class="kpi"><div class="k-label">Sharpe</div><div class="k-val">1.34</div><div class="k-sub">risk-adjusted</div></div>
+        <div class="kpi"><div class="k-label">Max drawdown</div><div class="k-val neg">-18.2%</div><div class="k-sub">worst dip</div></div>
+        <div class="kpi"><div class="k-label">Win rate</div><div class="k-val">58%</div><div class="k-sub">of 24 trades</div></div>
+      </section>
+
+      <section class="card" aria-label="Price and trades">
+        <div class="card-h">
+          <div class="chart-title"><span class="eyebrow">Price &amp; trades</span><span class="tkr">AAPL</span></div>
+          <div style="display:flex;align-items:center;gap:var(--s4)">
+            <div class="legend"><span><i style="background:var(--up)"></i>up</span><span><i style="background:var(--down)"></i>down</span></div>
+            <div class="seg mini" role="group" aria-label="Chart type">
+              <button aria-pressed="true">Candles</button><button aria-pressed="false">Area</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-b">
+          <svg class="chart" id="priceChart" viewBox="0 0 1000 340" preserveAspectRatio="none" role="img" aria-label="Candlestick chart of AAPL with buy and sell markers"></svg>
+          <svg class="chart" id="volChart" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true" style="margin-top:6px"></svg>
+          <div class="axis-note">Volume &middot; &#9650; buy &#9660; sell</div>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Equity curve">
+        <div class="card-h">
+          <span class="eyebrow">Equity curve — strategy vs. buy &amp; hold</span>
+          <div class="legend"><span><i style="background:var(--accent)"></i>strategy</span><span><i style="background:var(--text-3)"></i>buy &amp; hold</span></div>
+        </div>
+        <div class="card-b">
+          <svg class="chart" id="eqChart" viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label="Equity curve comparing strategy to buy and hold"></svg>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ---------- direction switching (persisted) ---------- */
+const DESC = {
+  onyx:"Dense quant terminal — cool near-black, teal signal, monospace-forward.",
+  cobalt:"Spacious Linear/Vercel feel — indigo charcoal, electric blue, soft depth.",
+  daylight:"Light and approachable — professional, high-legibility, deep-blue accent."
+};
+const app = document.getElementById('app');
+const desc = document.getElementById('dirDesc');
+function setDir(d){
+  app.dataset.theme = d;
+  desc.textContent = DESC[d];
+  document.querySelectorAll('.switcher button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.set===d)));
+  try{ localStorage.setItem('bullpen_dir', d); }catch(e){}
+}
+document.querySelectorAll('.switcher button').forEach(b=> b.addEventListener('click', ()=>setDir(b.dataset.set)));
+let saved='onyx'; try{ saved = localStorage.getItem('bullpen_dir')||'onyx'; }catch(e){}
+setDir(saved);
+
+/* ---------- sample OHLC data (representative, not live) ---------- */
+function genCandles(n, start){
+  const out=[]; let price=start; let seed=7;
+  const rnd=()=>{ seed=(seed*9301+49297)%233280; return seed/233280; };
+  for(let i=0;i<n;i++){
+    const drift=Math.sin(i/7)*0.6 + (i/n)*0.9;      // gentle uptrend with waves
+    const o=price;
+    const move=(rnd()-0.46+drift*0.12)*3.6;
+    const c=Math.max(5,o+move);
+    const h=Math.max(o,c)+rnd()*2.2;
+    const l=Math.min(o,c)-rnd()*2.2;
+    const v=40+rnd()*60+Math.abs(move)*8;
+    out.push({o,h,l,c,v}); price=c;
+  }
+  return out;
+}
+const candles = genCandles(46, 150);
+const markers = [ {i:6,type:'buy'}, {i:13,type:'sell'}, {i:21,type:'buy'}, {i:29,type:'sell'}, {i:35,type:'buy'} ];
+
+/* ---------- draw candlesticks ---------- */
+(function drawPrice(){
+  const W=1000,H=340,padT=14,padB=14;
+  const lo=Math.min(...candles.map(c=>c.l)), hi=Math.max(...candles.map(c=>c.h));
+  const span=(hi-lo)||1;
+  const y=p=> padT + (H-padT-padB) * (1-(p-lo)/span);
+  const n=candles.length, slot=W/n, bw=Math.min(slot*0.62,15);
+  let g='<g class="grid">';
+  for(let k=0;k<=4;k++){ const yy=padT+(H-padT-padB)*k/4; g+=`<line x1="0" y1="${yy.toFixed(1)}" x2="${W}" y2="${yy.toFixed(1)}"/>`; }
+  g+='</g>';
+  let s=g;
+  candles.forEach((c,i)=>{
+    const x=slot*i+slot/2, up=c.c>=c.o, cls=up?'c-up':'c-down';
+    const top=y(Math.max(c.o,c.c)), bot=y(Math.min(c.o,c.c));
+    const bh=Math.max(1.4,bot-top);
+    s+=`<line x1="${x.toFixed(1)}" y1="${y(c.h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y(c.l).toFixed(1)}" class="${cls}" stroke-width="1.2"/>`;
+    s+=`<rect x="${(x-bw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" class="${cls}"/>`;
+  });
+  markers.forEach(m=>{
+    const c=candles[m.i]; if(!c) return; const x=slot*m.i+slot/2;
+    if(m.type==='buy'){ const yy=y(c.l)+16; s+=`<path d="M${x} ${yy-7} L${x-5} ${yy+3} L${x+5} ${yy+3} Z" class="marker-buy"/>`; }
+    else { const yy=y(c.h)-16; s+=`<path d="M${x} ${yy+7} L${x-5} ${yy-3} L${x+5} ${yy-3} Z" class="marker-sell"/>`; }
+  });
+  document.getElementById('priceChart').innerHTML=s;
+  // volume
+  const VW=1000,VH=60, vmax=Math.max(...candles.map(c=>c.v));
+  let v='';
+  candles.forEach((c,i)=>{ const x=slot*i+slot/2, h=(c.v/vmax)*VH*0.9, up=c.c>=c.o;
+    v+=`<rect x="${(x-bw/2).toFixed(1)}" y="${(VH-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" class="${up?'vol-up':'vol-down'}"/>`; });
+  document.getElementById('volChart').innerHTML=v;
+})();
+
+/* ---------- draw equity curve ---------- */
+(function drawEq(){
+  const W=1000,H=220,padT=12,padB=12;
+  const n=48; const strat=[], bh=[]; let s=10000,b=10000,seed=3;
+  const rnd=()=>{ seed=(seed*9301+49297)%233280; return seed/233280; };
+  for(let i=0;i<n;i++){ s*= 1+(rnd()-0.44)*0.02+0.004; b*=1+(rnd()-0.46)*0.02+0.003; strat.push(s); bh.push(b); }
+  const all=strat.concat(bh); const lo=Math.min(...all),hi=Math.max(...all),span=(hi-lo)||1;
+  const x=i=>W*i/(n-1); const y=val=>padT+(H-padT-padB)*(1-(val-lo)/span);
+  const path=arr=>arr.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  const area=`${path(strat)} L${W} ${H-padB} L0 ${H-padB} Z`;
+  let g='<g class="grid">'; for(let k=0;k<=3;k++){const yy=padT+(H-padT-padB)*k/3; g+=`<line x1="0" y1="${yy}" x2="${W}" y2="${yy}"/>`;} g+='</g>';
+  const defs=`<defs><linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
+     <stop offset="0" stop-color="var(--accent)" stop-opacity="0.28"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>`;
+  document.getElementById('eqChart').innerHTML =
+    defs+g+`<path d="${area}" class="eq-area"/><path d="${path(bh)}" class="eq-bh"/><path d="${path(strat)}" class="eq-strat"/>`;
+})();
+</script>
+</body>
+</html>

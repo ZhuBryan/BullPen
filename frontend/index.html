@@ -305,6 +305,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <button id="tabBtnAnalysis" class="tabbtn" onclick="showTab('analysis')">Analysis</button>
     <button id="tabBtnRegime"   class="tabbtn" onclick="showTab('regime')">Regime</button>
     <button id="tabBtnCompare"  class="tabbtn" onclick="showTab('compare')">Compare</button>
+    <button id="tabBtnEngine"   class="tabbtn" onclick="showTab('engine')">Engine</button>
   </nav>
 </header>
 
@@ -476,6 +477,13 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
           <p id="labRuleStatus" class="rule-status"></p>
         </div>
         <p id="stratDesc" class="sub" style="margin:12px 0 0;font-size:12px;"></p>
+        <label class="feat-toggle" style="margin-top:12px" for="realFills">
+          <input type="checkbox" id="realFills">
+          <span>Realistic fills</span>
+        </label>
+        <p class="sub" style="font-size:11px;margin-top:4px">
+          Also charge an estimated half-spread and market impact, not just commission.
+        </p>
         <p id="error" class="error"></p>
         <button id="runBtn" onclick="runBacktest()" style="margin-top:16px;width:100%">Run Backtest</button>
       </div>
@@ -764,6 +772,73 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
 
   </div>
 </div><!-- end #tabCompare -->
+
+<!-- ===================================================================
+     TAB 6 — ENGINE (matching engine: simulated market + research agent)
+     =================================================================== -->
+<div id="tabEngine" class="tab-panel">
+  <div class="main-col" style="padding:24px 0">
+
+    <div class="card">
+      <h3>Simulated market — price is produced, not downloaded</h3>
+      <p class="sub" style="margin-bottom:16px">
+        Trading bots post real orders into the matching engine and trade against each other.
+        Nobody supplies a price: the candles below are what they actually traded at.
+        Market makers quote both sides and skew to shed inventory, momentum bots chase moves,
+        mean-reverters fade them, noise traders add uninformed flow.
+      </p>
+      <div class="controls" style="margin-bottom:16px">
+        <div class="field w-110"><label for="simSteps">Steps</label>
+          <input id="simSteps" type="number" value="400" min="50" max="2000"></div>
+        <div class="field w-110"><label for="simSeed">Seed</label>
+          <input id="simSeed" type="number" value="7"></div>
+        <button id="simBtn" onclick="runSim()">Run market</button>
+      </div>
+      <p id="simErr" class="error"></p>
+      <div id="simOut" style="display:none">
+        <div class="chart-box" style="height:280px"><canvas id="simChart"></canvas></div>
+        <div class="chart-box vol-box"><canvas id="simVol"></canvas></div>
+        <div class="vol-label">Volume · trades per step</div>
+        <div style="margin-top:20px">
+          <table class="lb-table" id="simAgents">
+            <thead><tr>
+              <th>Agent</th><th>Type</th>
+              <th style="text-align:right">Position</th>
+              <th style="text-align:right">P&amp;L</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="sub" style="font-size:12px;margin-top:10px">
+            P&amp;L is zero-sum: every dollar won is a dollar lost by another agent.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Research agent — searches, then discounts itself</h3>
+      <p class="sub" style="margin-bottom:16px">
+        The agent proposes strategies, backtests them, and refines. The interesting part is
+        the critic: search enough variations and one will look brilliant by pure luck, so
+        every result is measured against what luck alone would produce after that many trials.
+        A verdict of <b style="color:var(--text)">not supported</b> is the normal, honest outcome.
+      </p>
+      <div class="controls" style="margin-bottom:16px">
+        <div class="field w-110"><label for="agTicker">Ticker</label>
+          <input id="agTicker" value="AAPL"></div>
+        <div class="field w-110"><label for="agBudget">Trials</label>
+          <input id="agBudget" type="number" value="40" min="5" max="200"></div>
+        <button id="agBtn" onclick="runAgent()">Run search</button>
+      </div>
+      <p id="agErr" class="error"></p>
+      <div id="agOut" style="display:none">
+        <dl class="metrics-grid" id="agMetrics"></dl>
+        <div id="agVerdict" class="note" style="margin-top:16px"></div>
+      </div>
+    </div>
+
+  </div>
+</div><!-- end #tabEngine -->
 
 </div><!-- .page -->
 
@@ -1087,7 +1162,7 @@ function tradeMarkers(trades, dates) {
 let compareInitialized = false;
 
 function showTab(which) {
-  ['arena','lab','analysis','regime','compare'].forEach(t => {
+  ['arena','lab','analysis','regime','compare','engine'].forEach(t => {
     const cap = t.charAt(0).toUpperCase() + t.slice(1);
     const panel = document.getElementById('tab' + cap);
     if (panel) panel.style.display = t === which ? 'block' : 'none';
@@ -1394,7 +1469,8 @@ async function runBacktest() {
     const res = await fetch('/api/backtest', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ticker, start: document.getElementById('start').value,
-        end: document.getElementById('end').value, strategy: s.id, params}),
+        end: document.getElementById('end').value, strategy: s.id, params,
+        realistic_fills: document.getElementById('realFills').checked}),
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'Backtest failed');
     render(await res.json());
@@ -2315,6 +2391,89 @@ function renderCorrHeatmap(items) {
   }
   html += '</tbody>';
   document.getElementById('cmpCorrTable').innerHTML = html;
+}
+
+/* =====================================================================
+   ENGINE TAB — simulated market + research agent
+   ===================================================================== */
+let simChart = null, simVol = null;
+
+async function runSim() {
+  const btn = document.getElementById('simBtn'), err = document.getElementById('simErr');
+  err.style.display = 'none'; btn.disabled = true; btn.textContent = 'Running…';
+  try {
+    const res = await fetch('/api/sim/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        steps: Number(document.getElementById('simSteps').value) || 400,
+        seed:  Number(document.getElementById('simSeed').value)  || 7,
+      }),
+    });
+    if (!res.ok) throw new Error('Simulation failed');
+    const d = await res.json();
+    if (!d.bars || !d.bars.length) throw new Error('The market produced no trades.');
+
+    document.getElementById('simOut').style.display = 'block';
+    const labels = d.bars.map((_, i) => 'step ' + (i + 1));
+    const candles = d.bars.map(b => ({o: b.o, h: b.h, l: b.l, c: b.c}));
+    if (simChart) simChart.destroy();
+    if (simVol) simVol.destroy();
+    simChart = makePriceChart('simChart', labels, candles, null, 'candle');
+    simVol = makeVolumeChart('simVol', labels, candles, d.bars.map(b => b.v));
+
+    document.querySelector('#simAgents tbody').innerHTML = d.agents.map(a =>
+      '<tr><td>' + escHtml(a.name) + '</td>' +
+      '<td style="color:var(--muted)">' + escHtml(a.kind) + '</td>' +
+      '<td style="text-align:right;font-family:\'JetBrains Mono\',monospace">' + a.position + '</td>' +
+      '<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:' +
+        (a.pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+        (a.pnl >= 0 ? '+' : '') + Number(a.pnl).toFixed(2) + '</td></tr>').join('');
+  } catch (e) {
+    err.textContent = e.message; err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Run market';
+  }
+}
+
+async function runAgent() {
+  const btn = document.getElementById('agBtn'), err = document.getElementById('agErr');
+  err.style.display = 'none'; btn.disabled = true; btn.textContent = 'Searching…';
+  try {
+    const res = await fetch('/api/agent/search', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        ticker: document.getElementById('agTicker').value.trim() || 'AAPL',
+        budget: Number(document.getElementById('agBudget').value) || 40,
+      }),
+    });
+    if (!res.ok) throw new Error('Agent search failed');
+    const d = await res.json();
+    if (!d.found) throw new Error(d.reason || 'No strategy found.');
+
+    const o = d.out_of_sample, c = d.critic;
+    document.getElementById('agOut').style.display = 'block';
+    document.getElementById('agMetrics').innerHTML = [
+      makeMCard('Strategy', escHtml(d.strategy), ''),
+      makeMCard('Trials', d.trials, ''),
+      makeMCard('Out-of-sample return', o.return_pct + '%', o.return_pct >= 0 ? 'pos' : 'neg'),
+      makeMCard('Out-of-sample Sharpe', o.sharpe, o.sharpe >= 1 ? 'pos' : 'neg'),
+      makeMCard('Luck benchmark', c.luck_benchmark, ''),
+      makeMCard('Deflated Sharpe', c.deflated_sharpe, c.passed ? 'pos' : 'neg'),
+    ].join('');
+
+    const verdict = document.getElementById('agVerdict');
+    verdict.style.borderLeftColor = c.passed ? 'var(--green)' : 'var(--amber)';
+    verdict.innerHTML =
+      '<b style="color:' + (c.passed ? 'var(--green)' : 'var(--amber)') + '">' +
+      (c.passed ? 'Survives scrutiny' : 'Not supported') + '</b><br>' +
+      escHtml(c.reason) +
+      '<br><span style="color:var(--muted)">Parameters: ' +
+      escHtml(JSON.stringify(d.params)) + '</span>';
+  } catch (e) {
+    err.textContent = e.message; err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Run search';
+  }
 }
 
 /* =====================================================================

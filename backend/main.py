@@ -51,6 +51,15 @@ class RulesValidateRequest(BaseModel):
     sell_rule: str = ""
 
 
+class AgentRequest(BaseModel):
+    ticker: str = "AAPL"
+    start: str = "2020-01-01"
+    end: str = "2025-01-01"
+    budget: int = 40
+    seed: int = 0
+    realistic_fills: bool = True
+
+
 class SimRequest(BaseModel):
     steps: int = 400
     seed: int = 7
@@ -282,6 +291,27 @@ def rules_validate(req: RulesValidateRequest):
     if ok:
         return {"valid": True}
     return {"valid": False, "error": err}
+
+
+@app.post("/api/agent/search")
+def agent_search(req: AgentRequest):
+    """
+    Autonomous strategy search that discounts its own findings.
+
+    The agent proposes, backtests, and refines. Every proposal counts as a
+    trial, and the critic uses the Deflated Sharpe Ratio to ask whether the
+    winner beats what pure luck would produce after that many attempts. A
+    "found" result with passed=false is the honest and common outcome.
+    """
+    from backend.agent import ResearchAgent
+
+    prices, source = _load_prices_for_analysis(req.ticker, req.start, req.end)
+    budget = max(5, min(int(req.budget), 200))
+    out = ResearchAgent(prices, budget=budget, seed=int(req.seed),
+                        realistic_fills=req.realistic_fills).run()
+    out["ticker"] = req.ticker.upper().strip()
+    out["data_source"] = source
+    return out
 
 
 @app.post("/api/sim/run")

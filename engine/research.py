@@ -26,8 +26,10 @@ Run `python research.py` for the self-check.
 
 import numpy as np
 
-from capture import DepthStream
-from replay import best_pair, features, ofi, replay
+try:                                  # importable as a package or run directly
+    from engine.replay import best_pair, features, ofi, replay
+except ImportError:
+    from replay import best_pair, features, ofi, replay
 
 
 # ---------------------------------------------------------------------------

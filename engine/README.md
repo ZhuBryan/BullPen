@@ -1,4 +1,4 @@
-# nanoex
+# Bullpen Engine
 
 A limit order book exchange simulator and microstructure research framework, built from scratch.
 

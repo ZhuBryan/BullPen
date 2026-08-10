@@ -25,7 +25,10 @@ Run `python replay.py` for the self-check (no network, synthetic data).
 import gzip
 import json
 
-from capture import DepthStream
+try:                                  # importable as a package or run directly
+    from engine.capture import DepthStream
+except ImportError:
+    from capture import DepthStream
 
 BUY, SELL = "B", "S"
 

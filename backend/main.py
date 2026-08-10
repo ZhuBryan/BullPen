@@ -36,6 +36,8 @@ class BacktestRequest(BaseModel):
     params: dict = {}
     starting_cash: float = 10_000.0
     regime_filter: Optional[str] = None
+    realistic_fills: bool = False
+    participation: float = 0.01
 
 
 class RegimeRequest(BaseModel):
@@ -226,7 +228,11 @@ def _run_strategy(req):
         # What fraction of days were in this regime?
         regime_fraction = round(float(mask.reindex(positions.index).fillna(False).mean() * 100), 2)
 
-    result = run_backtest(prices, positions, starting_cash=req.starting_cash)
+    result = run_backtest(
+        prices, positions, starting_cash=req.starting_cash,
+        realistic_fills=getattr(req, "realistic_fills", False),
+        participation=getattr(req, "participation", 0.01),
+    )
     result["ticker"] = req.ticker.upper()
     result["strategy"] = label
     result["data_source"] = source

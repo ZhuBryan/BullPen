@@ -27,10 +27,15 @@ def run_backtest(
     positions: pd.Series,
     starting_cash: float = 10_000.0,
     commission_pct: float = 0.001,  # 0.1% per trade, a realistic friction
+    realistic_fills: bool = False,
+    participation: float = 0.01,
 ) -> dict:
     """
     prices:    DataFrame with a 'Close' column, indexed by date
     positions: Series of 0/1 (same index), produced by a strategy
+    realistic_fills: also charge an estimated half-spread and square-root
+        market impact per trade (see fills.py), on top of commission. Off by
+        default so existing results stay comparable.
     Returns a dict with the equity curve, metrics, and trade log.
     """
     close = prices["Close"]
@@ -42,7 +47,11 @@ def run_backtest(
     # --- Step 2: daily returns ----------------------------------------
     stock_ret = close.pct_change().fillna(0)
     trades = pos.diff().abs().fillna(pos.iloc[0])  # 1 on days we enter/exit
-    strat_ret = pos * stock_ret - trades * commission_pct
+    cost_per_trade = commission_pct
+    if realistic_fills:
+        from backend.fills import estimate_costs
+        cost_per_trade = commission_pct + estimate_costs(prices, participation)
+    strat_ret = pos * stock_ret - trades * cost_per_trade
 
     # --- Step 3: equity curves ----------------------------------------
     equity = starting_cash * (1 + strat_ret).cumprod()

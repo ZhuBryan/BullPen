@@ -807,7 +807,7 @@ for col, values in regime_result2["features"].items():
 
 # =====================================
 print(f"\nALL {PASSED} CHECKS PASSED")
-rint("\n[19] GET /api/ticker/info — valid shape, graceful on bad ticker")
+print("\n[19] GET /api/ticker/info — valid shape, graceful on bad ticker")
 # ===========================================================================
 from backend.main import ticker_info
 

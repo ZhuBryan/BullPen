@@ -81,6 +81,23 @@ A few limitations worth being honest about:
 
 Run one strategy across up to six tickers at once on a shared date range. You get all their equity curves on one chart, a summary metrics table, and a return-correlation heatmap that shows how closely each pair moves together day to day. Low correlations are the ones that actually diversify risk.
 
+## engine/: the matching engine underneath
+
+Everything above treats prices as something that already happened. `engine/` is the other half: a limit order book exchange built from scratch, where prices are produced rather than downloaded.
+
+- **Matching engine** with real price-time priority, integer tick prices, partial fills, and lazy cancellation. 269,000 orders/sec single-threaded in pure Python, with a p99 of 12.6 microseconds.
+- **Live capture** of Binance L2 depth and trades over the public websocket, including the snapshot/diff handshake and sequence-gap detection that keep a local book honest.
+- **Replay with queue position**, so a backtest asks "would my order actually have filled, given the 400 shares queued ahead of it" instead of assuming a fill at mid.
+- **Purged walk-forward research**, which drops training rows whose labels overlap the test window. Ordinary k-fold leaks here and inflates every metric.
+
+```bash
+cd engine
+python test.py     # all self-checks
+python bench.py    # throughput and tail latency
+```
+
+See `engine/README.md` for the benchmark methodology and the before/after numbers, including the profiling mistake that led to the 28x tail-latency fix.
+
 ## The metrics, in plain English
 
 - **Total return:** how much you made versus just holding your starting cash.
@@ -109,7 +126,9 @@ A signal computed from today's close can only be traded tomorrow. The engine shi
 | `backend/arena.py` | The live arena: replay clock, default fighters, leaderboard, agent persistence |
 | `backend/main.py` | FastAPI server and all JSON API endpoints |
 | `frontend/index.html` | The web UI: Arena, Lab, Analysis, Regime, and Compare tabs, built with Chart.js and vanilla JS |
+| `backend/ai.py` | Turns a plain-English strategy description into validated rules, using your own API key or a local model |
 | `backend/test_bullpen.py` | Plain-Python test suite, run with `python backend/test_bullpen.py` |
+| `engine/` | The matching engine, live capture, queue-position replay, and research pipeline |
 
 ## Roadmap
 

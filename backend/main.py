@@ -51,6 +51,11 @@ class RulesValidateRequest(BaseModel):
     sell_rule: str = ""
 
 
+class SimRequest(BaseModel):
+    steps: int = 400
+    seed: int = 7
+
+
 class AITranslateRequest(BaseModel):
     description: str = ""
     provider: str = "openai"       # openai | anthropic | gemini | local
@@ -277,6 +282,21 @@ def rules_validate(req: RulesValidateRequest):
     if ok:
         return {"valid": True}
     return {"valid": False, "error": err}
+
+
+@app.post("/api/sim/run")
+def sim_run(req: SimRequest):
+    """
+    Run an agent-based market where the price is produced, not downloaded.
+
+    Agents post orders into the matching engine and trade against each other,
+    so the returned candles are the market's own output. Deterministic for a
+    given seed.
+    """
+    from backend.market_sim import Simulation
+
+    steps = max(50, min(int(req.steps), 2_000))   # keep a request bounded
+    return Simulation(seed=int(req.seed)).run(steps)
 
 
 @app.post("/api/ai/translate")

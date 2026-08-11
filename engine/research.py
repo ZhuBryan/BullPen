@@ -75,13 +75,19 @@ def build_dataset(path, horizon=20):
 # ---------------------------------------------------------------------------
 # Purged walk-forward cross-validation
 # ---------------------------------------------------------------------------
-def purged_walk_forward(n, folds=4, horizon=20, embargo=None):
-    """Yield (train_idx, test_idx) with expanding train windows.
+def purged_walk_forward(n, folds=4, horizon=20):
+    """Yield (train_idx, test_idx): expanding window, train STRICTLY before test.
 
-    Train rows whose label window runs into the test block are purged, and rows
-    immediately after the test block are embargoed.
+    Training data is only ever the past. That is stricter than Lopez de Prado's
+    PurgedKFold, which also trains on data after the test block; PurgedKFold is
+    a legitimate scheme, but it is not walk-forward and cannot be described as
+    "the model only saw the past", which is the claim worth being able to make.
+
+    Purging: a row at index i carries a label that looks `horizon` steps ahead,
+    so it is only safe to train on when i + horizon < test_start. Rows failing
+    that are dropped. No embargo is needed on the trailing side, because nothing
+    after the test block is used for training in the first place.
     """
-    embargo = horizon if embargo is None else embargo
     fold = n // (folds + 1)
     if fold <= 0:
         return
@@ -91,10 +97,8 @@ def purged_walk_forward(n, folds=4, horizon=20, embargo=None):
         if test_end <= test_start:
             break
         test = np.arange(test_start, test_end)
-        train = np.arange(0, n)
-        keep = ((train + horizon < test_start) |
-                (train >= min(test_end + embargo, n)))
-        yield train[keep], test
+        train = np.arange(0, test_start)
+        yield train[train + horizon < test_start], test
 
 
 # ---------------------------------------------------------------------------
@@ -197,15 +201,18 @@ def demo():
 
     # ---- purging actually removes overlapping rows ----
     n, horizon = 500, 20
+    seen_folds = 0
     for train, test in purged_walk_forward(n, folds=4, horizon=horizon):
-        assert train.max(initial=-1) < n
+        seen_folds += 1
+        # the defining property: training data is strictly in the past
+        assert train.max(initial=-1) < test[0], "trained on the future"
         # no training row's label window may reach into the test block
-        overlap = train[(train + horizon >= test[0]) & (train < test[0])]
+        overlap = train[train + horizon >= test[0]]
         assert len(overlap) == 0, f"purge failed: {overlap[:5]}"
-        # embargo: nothing from the window right after the test block
-        emb = train[(train >= test[-1] + 1) & (train < test[-1] + 1 + horizon)]
-        assert len(emb) == 0, f"embargo failed: {emb[:5]}"
         assert set(train) & set(test) == set(), "train/test overlap"
+        # the newest usable training row sits exactly `horizon` before the test
+        assert train.max(initial=-1) == test[0] - horizon - 1
+    assert seen_folds == 4, f"expected 4 folds, got {seen_folds}"
 
     # ---- AUC sanity ----
     y = np.array([0, 0, 1, 1])

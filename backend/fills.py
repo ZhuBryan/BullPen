@@ -14,7 +14,13 @@ strategies die. Three costs, all estimated from OHLCV we already have:
      costs about 2x the impact per share. This is one of the most robust
      empirical findings in market microstructure.
 
-         impact = alpha * daily_volatility * sqrt(shares / daily_volume)
+         impact = alpha * daily_volatility * sqrt(participation)
+
+     `participation` is an ASSUMPTION you supply (the fraction of the day's
+     volume your order represents), not something derived from the Volume
+     column. The backtest sizes positions as all-in fractions of equity, so
+     there is no share count to divide by volume. If you want impact to track
+     real order sizes, feed it a per-day participation series instead.
 
   3. COMMISSION. Flat, already handled by the backtest engine.
 
@@ -29,11 +35,26 @@ Run `python backend/fills.py` for the self-check.
 import numpy as np
 import pandas as pd
 
-# Impact coefficient. Published estimates cluster around 0.5-1.0 for equities;
-# 1.0 is the conservative end, which is the right direction to be wrong in.
+# Impact coefficient. Published estimates cluster around 0.3-1.0 for equities
+# (Almgren et al. 2005); 1.0 is the conservative end, the right direction to be
+# wrong in.
 DEFAULT_ALPHA = 1.0
-DEFAULT_PARTICIPATION = 0.01   # trade 1% of a day's volume
-MIN_HALF_SPREAD = 0.0001       # 1bp floor, even for the calmest mega-cap
+DEFAULT_PARTICIPATION = 0.01   # assume the order is 1% of that day's volume
+
+# Half-spread as a fraction of the day's high-low range.
+#
+# Calibration matters here and the naive number is badly wrong. A liquid
+# mega-cap trades a ~1.5% daily range against an effective half-spread near
+# 0.5bp, so range exceeds half-spread by a factor in the hundreds to thousands,
+# not single digits. 0.001 * range puts a typical large-cap near 1.5bp, which
+# is the right order of magnitude, and scales sensibly to choppier names.
+#
+# This is still a crude proxy: the daily range is driven by volatility, not by
+# the spread. The proper estimators separate the two using the ratio of two-day
+# to one-day ranges (Corwin-Schultz 2012, or Abdi-Ranaldo 2017). Use one of
+# those if the spread estimate itself needs to be defensible.
+SPREAD_K = 0.001
+MIN_HALF_SPREAD = 0.00005      # 0.5bp floor, roughly a mega-cap on a calm day
 MAX_COST = 0.05                # 5% sanity cap so a bad bar cannot delete an account
 
 
@@ -48,15 +69,17 @@ def estimate_costs(prices: pd.DataFrame, participation: float = DEFAULT_PARTICIP
     # --- half-spread proxy from the day's range ---------------------------
     if "High" in prices.columns and "Low" in prices.columns:
         rng = (prices["High"] - prices["Low"]) / close.replace(0, np.nan)
-        # A day's high-low range is roughly 4-5x the effective spread for
-        # liquid names; 0.1 * range is a deliberately conservative half-spread.
-        half_spread = (0.1 * rng).clip(lower=MIN_HALF_SPREAD)
+        half_spread = (SPREAD_K * rng).clip(lower=MIN_HALF_SPREAD)
     else:
         half_spread = pd.Series(MIN_HALF_SPREAD, index=close.index)
 
     # --- square-root market impact ---------------------------------------
-    daily_vol = close.pct_change().rolling(vol_window).std()
-    daily_vol = daily_vol.bfill().fillna(0.0)
+    # Expanding minimum-2 for the warm-up window rather than bfill(): filling
+    # backwards would seed the first rows with volatility computed from days
+    # that had not happened yet. It only affects costs, never signals, but
+    # "no lookahead anywhere" should be true without an asterisk.
+    daily_vol = close.pct_change().rolling(vol_window, min_periods=2).std()
+    daily_vol = daily_vol.fillna(0.0)
     impact = alpha * daily_vol * np.sqrt(max(participation, 0.0))
 
     total = (half_spread + impact).clip(upper=MAX_COST)

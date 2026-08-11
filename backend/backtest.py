@@ -65,8 +65,11 @@ def run_backtest(
     bh_return = buy_hold.iloc[-1] / starting_cash - 1
     cagr = (equity.iloc[-1] / starting_cash) ** (1 / years) - 1 if years > 0 else 0.0
 
-    # Sharpe ratio: average excess return / volatility, annualized.
+    # Sharpe ratio: average return / volatility, annualized.
     # > 1 is good, > 2 is great, > 3 means check your code for bugs :)
+    # NOTE: risk-free rate is taken as ZERO, so this is a raw Sharpe, not an
+    # excess-return Sharpe. With rf at 5% that flatters a long-only strategy by
+    # roughly 0.05/annual_vol. Fine as a convention, as long as it is stated.
     std = strat_ret.std()
     sharpe = (strat_ret.mean() / std) * np.sqrt(TRADING_DAYS_PER_YEAR) if std > 0 else 0.0
 
@@ -76,13 +79,20 @@ def run_backtest(
     # divides by the standard deviation of just the negative daily returns
     # ("downside deviation"), so a strategy that has wild upside days but
     # calm downside days scores better here than under Sharpe.
-    downside = strat_ret[strat_ret < 0]
-    downside_std = downside.std()
-    if downside_std and downside_std > 0:
+    # Downside deviation is the root-mean-square of the NEGATIVE returns taken
+    # over EVERY observation, not the standard deviation of the negative ones.
+    # Two common mistakes hide here: dividing by the count of down days instead
+    # of the full sample, and measuring spread around the mean of the negatives
+    # instead of around the target return of zero. Both inflate Sortino, and
+    # they inflate it most for the strategies that already look best.
+    downside_std = float(np.sqrt((strat_ret.clip(upper=0) ** 2).mean()))
+    if downside_std > 0:
         sortino = (strat_ret.mean() / downside_std) * np.sqrt(TRADING_DAYS_PER_YEAR)
     else:
-        # No down days at all (or only one, so std is undefined) -- there's
-        # no downside risk to measure. Same convention as Sharpe: 0.0.
+        # No down days at all, so downside risk is zero and Sortino is formally
+        # infinite. We report 0.0 because the optimizer sorts on this field and
+        # None/inf would either crash it or fail to serialize. Treat 0.0 here as
+        # "undefined", not "bad" -- it only happens on degenerate inputs.
         sortino = 0.0
 
     # Max drawdown: worst peak-to-trough loss. The "how much pain" metric.
@@ -102,12 +112,22 @@ def run_backtest(
         calmar = 0.0
 
     # --- Step 5: trade log + win rate ----------------------------------
+    # `pos` is already shifted, so pos[i]=1 means we were HOLDING during day i,
+    # which means the buy happened at the close of day i-1. Reading close[i]
+    # here would report the wrong price and make win_rate disagree with the
+    # equity curve, so the fill price is the PREVIOUS close.
+    fill_price = close.shift(1)
     trade_log, entry_price, entry_date = [], None, None
     for date, p, prev in zip(close.index, pos, pos.shift(1).fillna(0)):
         if p == 1 and prev == 0:  # entered
-            entry_price, entry_date = close.loc[date], date
+            px = fill_price.loc[date]
+            if pd.isna(px):       # position open on the very first bar
+                px = close.loc[date]
+            entry_price, entry_date = px, date
         elif p == 0 and prev == 1 and entry_price is not None:  # exited
-            exit_price = close.loc[date]
+            exit_price = fill_price.loc[date]
+            if pd.isna(exit_price):
+                exit_price = close.loc[date]
             trade_log.append({
                 "entry_date": str(entry_date.date()),
                 "exit_date": str(date.date()),

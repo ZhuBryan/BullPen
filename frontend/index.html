@@ -19,7 +19,12 @@
   --border2:  #29334a;
   --text:     #e3e9f5;
   --text2:    #aab4c9;
-  --muted:    #6b7690;
+  /* --muted was #6b7690 = 4.35:1 on --bg, just under the 4.5:1 minimum, and it
+     is the colour of every section label, table header and helper line in the
+     app. #8b95ad measures ~6.4:1. */
+  --muted:    #8b95ad;
+  /* --faint is decorative only (hairlines, inactive strokes). It is far below
+     text contrast, so it must never be used for text or badge backgrounds. */
   --faint:    #39415a;
   --accent:   #4c7bf3;
   --accentH:  #6f9bff;
@@ -167,8 +172,10 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .lb-table tbody td{padding:9px 10px;color:var(--text);vertical-align:middle;font-variant-numeric:tabular-nums;}
 .rank-badge{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;}
 .rank-1{background:var(--gold);color:#000;}
-.rank-2{background:var(--faint);color:var(--text);}
-.rank-3{background:var(--faint);color:var(--muted);}
+/* --faint as a badge background put rank 2/3 text at ~2.2:1, effectively
+   unreadable. Use a real surface with full-strength text instead. */
+.rank-2{background:var(--surface3);color:var(--text);}
+.rank-3{background:var(--surface3);color:var(--text2);}
 .pos-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:100px;text-transform:uppercase;letter-spacing:0.04em;}
 .pos-long{background:rgba(34,197,94,0.15);color:var(--green);}
 .pos-cash{background:rgba(90,100,128,0.2);color:var(--muted);}
@@ -236,7 +243,7 @@ tbody tr:hover{background:var(--surface2);}
 .note{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--text);margin-bottom:16px;line-height:1.6;}
 .grid-field input.values{width:100%;min-width:200px;font-family:'JetBrains Mono',monospace;font-size:13px;}
 .field{display:flex;flex-direction:column;gap:4px;}
-.field label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
+.field label,.group-label{display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
 .controls{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;}
 h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;}
 .sub{color:var(--muted);font-size:13px;line-height:1.6;}
@@ -373,20 +380,17 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       <div class="card">
         <h3>Add a fighter</h3>
         <div class="field" style="margin-bottom:12px">
-          <label>Name (max 24 chars)</label>
-          <input id="agentName" maxlength="24" placeholder="e.g. Crash Test">
+          <label for="agentName">Name (max 24 chars)</label><input id="agentName" maxlength="24" placeholder="e.g. Crash Test">
         </div>
         <div class="field" style="margin-bottom:12px">
-          <label>Emoji</label>
-          <div class="emoji-row" id="emojiRow"></div>
+          <span class="group-label" id="emojiLabel">Emoji</span>
+          <div class="emoji-row" id="emojiRow" role="radiogroup" aria-labelledby="emojiLabel"></div>
         </div>
         <div class="field" style="margin-bottom:12px">
-          <label>Buy rule — go long next day if…</label>
-          <input id="agentBuy" class="rule-input" placeholder="e.g. RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)" spellcheck="false">
+          <label for="agentBuy">Buy rule — go long next day if…</label><input id="agentBuy" class="rule-input" placeholder="e.g. RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)" spellcheck="false">
         </div>
         <div class="field" style="margin-bottom:4px">
-          <label>Sell rule — go to cash next day if…</label>
-          <input id="agentSell" class="rule-input" placeholder="e.g. RSI(14) &gt; 70" spellcheck="false">
+          <label for="agentSell">Sell rule — go to cash next day if…</label><input id="agentSell" class="rule-input" placeholder="e.g. RSI(14) &gt; 70" spellcheck="false">
         </div>
         <div class="chips" id="agentChips"></div>
         <p id="agentRuleStatus" class="rule-status"></p>
@@ -459,19 +463,17 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       </div>
       <div class="card">
         <p class="label">Backtest</p>
-        <div class="field" style="margin-bottom:12px"><label>Ticker</label><input id="ticker" value="AAPL"></div>
-        <div class="field" style="margin-bottom:12px"><label>Start</label><input id="start" type="date" value="2020-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label>End</label><input id="end" type="date" value="2025-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label>Strategy</label><select id="strategy"></select></div>
+        <div class="field" style="margin-bottom:12px"><label for="ticker">Ticker</label><input id="ticker" value="AAPL"></div>
+        <div class="field" style="margin-bottom:12px"><label for="start">Start</label><input id="start" type="date" value="2020-01-01"></div>
+        <div class="field" style="margin-bottom:12px"><label for="end">End</label><input id="end" type="date" value="2025-01-01"></div>
+        <div class="field" style="margin-bottom:12px"><label for="strategy">Strategy</label><select id="strategy"></select></div>
         <div id="paramFields" style="display:flex;flex-direction:column;gap:12px;"></div>
         <div id="customRules" style="display:none;margin-top:12px">
           <div class="field" style="margin-bottom:12px">
-            <label>Buy rule</label>
-            <input id="labBuy" class="rule-input" placeholder="e.g. SMA(20) &gt; SMA(50)" spellcheck="false">
+            <label for="labBuy">Buy rule</label><input id="labBuy" class="rule-input" placeholder="e.g. SMA(20) &gt; SMA(50)" spellcheck="false">
           </div>
           <div class="field">
-            <label>Sell rule</label>
-            <input id="labSell" class="rule-input" placeholder="e.g. SMA(20) &lt; SMA(50)" spellcheck="false">
+            <label for="labSell">Sell rule</label><input id="labSell" class="rule-input" placeholder="e.g. SMA(20) &lt; SMA(50)" spellcheck="false">
           </div>
           <div class="chips" id="labChips"></div>
           <p id="labRuleStatus" class="rule-status"></p>
@@ -545,10 +547,10 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="sidebar">
       <div class="card">
         <p class="label">Settings</p>
-        <div class="field" style="margin-bottom:12px"><label>Ticker</label><input id="anTicker" value="AAPL"></div>
-        <div class="field" style="margin-bottom:12px"><label>Start</label><input id="anStart" type="date" value="2020-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label>End</label><input id="anEnd" type="date" value="2025-01-01"></div>
-        <div class="field"><label>Strategy</label><select id="anStrategy"></select></div>
+        <div class="field" style="margin-bottom:12px"><label for="anTicker">Ticker</label><input id="anTicker" value="AAPL"></div>
+        <div class="field" style="margin-bottom:12px"><label for="anStart">Start</label><input id="anStart" type="date" value="2020-01-01"></div>
+        <div class="field" style="margin-bottom:12px"><label for="anEnd">End</label><input id="anEnd" type="date" value="2025-01-01"></div>
+        <div class="field"><label for="anStrategy">Strategy</label><select id="anStrategy"></select></div>
         <p id="anStratDesc" class="sub" style="margin:12px 0 0;font-size:12px;"></p>
       </div>
     </div>
@@ -562,8 +564,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
           <div class="field grid-field"><label id="optParam1Label">Param 1</label><input id="optParam1Values" class="values" placeholder="e.g. 5,10,15,20" style="width:160px"></div>
           <div class="field grid-field"><label id="optParam2Label">Param 2</label><input id="optParam2Values" class="values" placeholder="e.g. 50,100,150,200" style="width:160px"></div>
           <div class="field">
-            <label>Objective</label>
-            <select id="optObjective" style="width:160px">
+            <label for="optObjective">Objective</label><select id="optObjective" style="width:160px">
               <option value="sharpe">Sharpe ratio</option>
               <option value="sortino">Sortino ratio</option>
               <option value="calmar_ratio">Calmar ratio</option>
@@ -590,8 +591,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
           <div class="field grid-field"><label id="wfParam1Label">Param 1</label><input id="wfParam1Values" class="values" style="width:160px"></div>
           <div class="field grid-field"><label id="wfParam2Label">Param 2</label><input id="wfParam2Values" class="values" style="width:160px"></div>
           <div class="field">
-            <label>Objective</label>
-            <select id="wfObjective" style="width:160px">
+            <label for="wfObjective">Objective</label><select id="wfObjective" style="width:160px">
               <option value="sharpe">Sharpe ratio</option>
               <option value="sortino">Sortino ratio</option>
               <option value="calmar_ratio">Calmar ratio</option>
@@ -599,7 +599,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
               <option value="total_return_pct">Total return %</option>
             </select>
           </div>
-          <div class="field"><label>Folds</label><input id="wfFolds" type="number" min="2" max="8" value="4" style="width:80px"></div>
+          <div class="field"><label for="wfFolds">Folds</label><input id="wfFolds" type="number" min="2" max="8" value="4" style="width:80px"></div>
           <button id="wfBtn" onclick="runWalkForward()">Run walk-forward</button>
         </div>
         <p id="wfError" class="error"></p>
@@ -620,7 +620,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
         <h3>Monte Carlo simulation</h3>
         <p class="note">Reshuffles the strategy's day-by-day returns thousands of times. NOT a forecast — it shows how much of the result might be luck vs. robust edge.</p>
         <div class="controls" style="margin-bottom:16px">
-          <div class="field"><label>Simulations</label><input id="mcSims" type="number" min="100" max="2000" value="500" style="width:100px"></div>
+          <div class="field"><label for="mcSims">Simulations</label><input id="mcSims" type="number" min="100" max="2000" value="500" style="width:100px"></div>
           <button id="mcBtn" onclick="runMonteCarlo()">Run Monte Carlo</button>
         </div>
         <p id="mcError" class="error"></p>
@@ -644,15 +644,15 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="sidebar">
       <div class="card">
         <p class="label">Regime detector</p>
-        <div class="field" style="margin-bottom:12px"><label>Ticker</label><input id="regTicker" value="SPY"></div>
-        <div class="field" style="margin-bottom:12px"><label>Start</label><input id="regStart" type="date"></div>
-        <div class="field" style="margin-bottom:12px"><label>End</label><input id="regEnd" type="date"></div>
+        <div class="field" style="margin-bottom:12px"><label for="regTicker">Ticker</label><input id="regTicker" value="SPY"></div>
+        <div class="field" style="margin-bottom:12px"><label for="regStart">Start</label><input id="regStart" type="date"></div>
+        <div class="field" style="margin-bottom:12px"><label for="regEnd">End</label><input id="regEnd" type="date"></div>
         <p id="regError" class="error"></p>
         <button id="regRunBtn" onclick="runRegime()" style="width:100%">Detect regimes</button>
       </div>
       <div class="card" id="regAttribCard" style="display:none">
         <p class="label">Strategy attribution</p>
-        <div class="field" style="margin-bottom:12px"><label>Strategy</label><select id="regAttribStrategy"></select></div>
+        <div class="field" style="margin-bottom:12px"><label for="regAttribStrategy">Strategy</label><select id="regAttribStrategy"></select></div>
         <p id="regAttribError" class="error"></p>
         <button id="regAttribBtn" onclick="runRegimeAttrib()" style="width:100%">Run attribution</button>
       </div>
@@ -701,13 +701,12 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
         <h3>Regime-gated backtest</h3>
         <p class="note">Only trade when the market is in a specific regime — fewer trades but potentially better odds on each.</p>
         <div class="controls" style="margin-bottom:16px">
-          <div class="field"><label>Ticker</label><input id="regBtTicker" style="width:90px"></div>
-          <div class="field"><label>Start</label><input id="regBtStart" type="date" style="width:140px"></div>
-          <div class="field"><label>End</label><input id="regBtEnd" type="date" style="width:140px"></div>
-          <div class="field"><label>Strategy</label><select id="regBtStrategy" style="width:160px"></select></div>
+          <div class="field"><label for="regBtTicker">Ticker</label><input id="regBtTicker" style="width:90px"></div>
+          <div class="field"><label for="regBtStart">Start</label><input id="regBtStart" type="date" style="width:140px"></div>
+          <div class="field"><label for="regBtEnd">End</label><input id="regBtEnd" type="date" style="width:140px"></div>
+          <div class="field"><label for="regBtStrategy">Strategy</label><select id="regBtStrategy" style="width:160px"></select></div>
           <div class="field">
-            <label>Trade only when</label>
-            <select id="regBtFilter" style="width:160px">
+            <label for="regBtFilter">Trade only when</label><select id="regBtFilter" style="width:160px">
               <option value="TRENDING">Trending</option>
               <option value="MEAN_REVERTING">Mean-Reverting</option>
               <option value="HIGH_VOLATILITY">High Volatility</option>
@@ -739,12 +738,11 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       <div class="card">
         <p class="label">Compare strategies</p>
         <div class="field" style="margin-bottom:12px">
-          <label>Tickers (comma-separated)</label>
-          <textarea id="cmpTickers" rows="2" placeholder="AAPL, MSFT, SPY, QQQ" style="height:56px"></textarea>
+          <label for="cmpTickers">Tickers (comma-separated)</label><textarea id="cmpTickers" rows="2" placeholder="AAPL, MSFT, SPY, QQQ" style="height:56px"></textarea>
         </div>
-        <div class="field" style="margin-bottom:12px"><label>Start</label><input id="cmpStart" type="date" value="2020-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label>End</label><input id="cmpEnd" type="date" value="2025-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label>Strategy</label><select id="cmpStrategy"></select></div>
+        <div class="field" style="margin-bottom:12px"><label for="cmpStart">Start</label><input id="cmpStart" type="date" value="2020-01-01"></div>
+        <div class="field" style="margin-bottom:12px"><label for="cmpEnd">End</label><input id="cmpEnd" type="date" value="2025-01-01"></div>
+        <div class="field" style="margin-bottom:12px"><label for="cmpStrategy">Strategy</label><select id="cmpStrategy"></select></div>
         <p id="cmpError" class="error"></p>
         <button id="cmpRunBtn" onclick="runCompare()" style="width:100%">Run comparison</button>
       </div>
@@ -931,11 +929,11 @@ async function fetchTickerInfo(ticker) {
     if (!d.available) { bar.style.display = 'none'; return; }
     const up = d.change >= 0;
     bar.innerHTML =
-      '<strong style="color:var(--text)">' + d.ticker + '</strong>' +
+      '<strong style="color:var(--text)">' + escHtml(d.ticker) + '</strong>' +
       '<span style="font-size:15px;font-weight:600">' + d.price.toFixed(2) + '</span>' +
       '<span style="color:' + (up ? 'var(--green)' : 'var(--red)') + '">' +
         (up ? '+' : '') + d.change.toFixed(2) + ' (' + (up ? '+' : '') + d.change_pct.toFixed(2) + '%)</span>' +
-      (d.name ? '<span style="color:var(--muted);font-size:11px">' + d.name + '</span>' : '');
+      (d.name ? '<span style="color:var(--muted);font-size:11px">' + escHtml(d.name) + '</span>' : '');
     bar.style.display = 'flex';
   } catch(e) { document.getElementById('tickerBar').style.display = 'none'; }
 }
@@ -954,6 +952,12 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// Chart.js ships its own font stack, which would render axis labels and
+// tooltips in a different typeface from the rest of the app. Point it at the
+// design system's fonts once, globally.
+Chart.defaults.font.family = "'Manrope', system-ui, sans-serif";
+Chart.defaults.font.size = 11;
+
 // Chart defaults — every new Chart() call merges or spreads these.
 const CHART_DEFAULTS = {
   responsive: true, maintainAspectRatio: false, animation: {duration: 250},
@@ -966,8 +970,8 @@ const CHART_DEFAULTS = {
     }
   },
   scales: {
-    x: {grid: {display: false}, ticks: {color: '#5a6480', font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
-    y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#5a6480', font: {size: 11}, maxTicksLimit: 6}, border: {display: false}}
+    x: {grid: {display: false}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
+    y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 6}, border: {display: false}}
   }
 };
 
@@ -1090,10 +1094,10 @@ function makePriceChart(canvasId, labels, candles, markers, mode) {
       animation: false,
       interaction: {mode: 'index', intersect: false},
       scales: {
-        x: {grid: {display: false}, ticks: {color: '#5a6480', font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
+        x: {grid: {display: false}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
         y: {position: 'right', min: lo - pad, max: hi + pad,
             grid: {color: 'rgba(255,255,255,0.04)'},
-            ticks: {color: '#5a6480', font: {size: 11}, maxTicksLimit: 6, callback: v => '$' + Number(v).toFixed(0)},
+            ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 6, callback: v => '$' + Number(v).toFixed(0)},
             border: {display: false}},
       },
       plugins: {
@@ -1167,7 +1171,10 @@ function showTab(which) {
     const panel = document.getElementById('tab' + cap);
     if (panel) panel.style.display = t === which ? 'block' : 'none';
     const btn = document.getElementById('tabBtn' + cap);
-    if (btn) btn.classList.toggle('active', t === which);
+    if (btn) {
+      btn.classList.toggle('active', t === which);
+      btn.setAttribute('aria-selected', String(t === which));
+    }
   });
   if (which === 'analysis' && !anStrategies.length) initAnalysis();
   if (which === 'regime'   && !regStrategiesLoaded)  initRegimeStrategies();
@@ -1245,8 +1252,8 @@ function makeArenaChart() {
           Number(ctx.parsed.y).toLocaleString(undefined, {maximumFractionDigits: 0})}}
       },
       scales: {
-        x: {grid: {display: false}, ticks: {color: '#5a6480', font: {size: 11}, maxTicksLimit: 10}, border: {display: false}},
-        y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#5a6480', font: {size: 11}, callback: v => '$' + Number(v).toLocaleString()}, border: {display: false}}
+        x: {grid: {display: false}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 10}, border: {display: false}},
+        y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#8b95ad', font: {size: 11}, callback: v => '$' + Number(v).toLocaleString()}, border: {display: false}}
       }
     })
   });
@@ -1263,7 +1270,7 @@ function updateArenaChart(state) {
     if (!d) d = {agentId: a.id, borderColor: colorFor(a.id), backgroundColor: colorFor(a.id),
                   borderWidth: 2, pointRadius: 0, tension: 0.3,
                   cubicInterpolationMode: 'monotone'};
-    d.label = (a.emoji || '🤖') + ' ' + a.name;
+    d.label = (a.emoji || '🤖') + ' ' + a.name;   // Chart.js escapes on render
     d.data = a.equity_series;
     return d;
   });
@@ -1276,7 +1283,7 @@ function renderLeaderboard(agents) {
   tbody.innerHTML = agents.map(a =>
     '<tr data-id="' + a.id + '">' +
     '<td><span class="rank-badge ' + (a.rank <= 3 ? 'rank-' + a.rank : '') + '">' + a.rank + '</span></td>' +
-    '<td><span style="margin-right:6px">' + (a.emoji || '🤖') + '</span>' + escHtml(a.name) + '</td>' +
+    '<td><span style="margin-right:6px">' + escHtml(a.emoji || '🤖') + '</span>' + escHtml(a.name) + '</td>' +
     '<td style="text-align:right;color:' + (a.return_pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
       (a.return_pct >= 0 ? '+' : '') + Number(a.return_pct).toFixed(2) + '%</td>' +
     '<td style="text-align:right;font-family:\'JetBrains Mono\',monospace">$' + Number(a.equity).toFixed(2) + '</td>' +
@@ -1432,7 +1439,7 @@ async function initLab() {
   catch { strategies = []; }
   strategies.push(CUSTOM_STRATEGY);
   const sel = document.getElementById('strategy');
-  sel.innerHTML = strategies.map(s => '<option value="' + s.id + '">' + s.label + '</option>').join('');
+  sel.innerHTML = strategies.map(s => '<option value="' + escHtml(s.id) + '">' + escHtml(s.label) + '</option>').join('');
   if (strategies.some(s => s.id === 'sma_crossover')) sel.value = 'sma_crossover';
   sel.onchange = renderParams;
   renderParams();
@@ -1444,7 +1451,7 @@ function renderParams() {
   document.getElementById('stratDesc').textContent = s.description;
   document.getElementById('customRules').style.display = s.id === 'custom' ? 'block' : 'none';
   document.getElementById('paramFields').innerHTML = s.params.map(p =>
-    '<div class="field"><label>' + p.label + '</label>' +
+    '<div class="field"><label for="param_' + p.name + '">' + escHtml(p.label) + '</label>' +
     '<input type="number" id="param_' + p.name + '" value="' + p.default +
     '" min="' + p.min + '" max="' + p.max + '"></div>').join('');
 }
@@ -1454,18 +1461,24 @@ async function runBacktest() {
   const err = document.getElementById('error');
   btn.disabled = true; btn.textContent = 'Running…'; err.style.display = 'none';
 
-  const s = strategies.find(x => x.id === document.getElementById('strategy').value);
-  let params = {};
-  if (s.id === 'custom') {
-    params = {buy_rule:  document.getElementById('labBuy').value.trim(),
-              sell_rule: document.getElementById('labSell').value.trim()};
-  } else {
-    s.params.forEach(p => params[p.name] = document.getElementById('param_' + p.name).value);
-  }
-  const ticker = document.getElementById('ticker').value.trim();
-  debouncedTickerInfo(ticker);
-
   try {
+    // Everything below must stay INSIDE the try. It was previously outside, so
+    // a failure here (clicking Run before /api/strategies resolves) escaped
+    // before `finally` and left the button disabled until a page reload.
+    const s = strategies.find(x => x.id === document.getElementById('strategy').value);
+    if (!s) throw new Error('Strategies are still loading — try again in a moment.');
+    let params = {};
+    if (s.id === 'custom') {
+      params = {buy_rule:  document.getElementById('labBuy').value.trim(),
+                sell_rule: document.getElementById('labSell').value.trim()};
+    } else {
+      s.params.forEach(p => {
+        const el = document.getElementById('param_' + p.name);
+        if (el) params[p.name] = el.value;
+      });
+    }
+    const ticker = document.getElementById('ticker').value.trim();
+    debouncedTickerInfo(ticker);
     const res = await fetch('/api/backtest', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ticker, start: document.getElementById('start').value,
@@ -1682,7 +1695,7 @@ async function initAnalysis() {
     anStrategies = all.filter(s => s.params && s.params.length > 0);
   } catch { anStrategies = []; }
   const sel = document.getElementById('anStrategy');
-  sel.innerHTML = anStrategies.map(s => '<option value="' + s.id + '">' + s.label + '</option>').join('');
+  sel.innerHTML = anStrategies.map(s => '<option value="' + escHtml(s.id) + '">' + escHtml(s.label) + '</option>').join('');
   if (anStrategies.some(s => s.id === 'sma_crossover')) sel.value = 'sma_crossover';
   sel.onchange = renderAnalysisStrategy;
   renderAnalysisStrategy();
@@ -1975,7 +1988,7 @@ async function initRegimeStrategies() {
     const all = await res.json();
     const builtin = all.filter(s => s.id !== 'custom');
     const sel = document.getElementById('regBtStrategy');
-    sel.innerHTML = builtin.map(s => '<option value="' + s.id + '">' + s.label + '</option>').join('');
+    sel.innerHTML = builtin.map(s => '<option value="' + escHtml(s.id) + '">' + escHtml(s.label) + '</option>').join('');
     if (builtin.some(s => s.id === 'sma_crossover')) sel.value = 'sma_crossover';
     // Populate attribution strategy dropdown with same list.
     const asel = document.getElementById('regAttribStrategy');
@@ -2030,7 +2043,7 @@ function renderRegimeChart(r) {
     }]},
     options: chartOpts({
       animation: false, interaction: {mode: 'index', intersect: false},
-      scales: {y: {ticks: {callback: v => '$' + Number(v).toFixed(0), color: '#5a6480', font: {size: 11}},
+      scales: {y: {ticks: {callback: v => '$' + Number(v).toFixed(0), color: '#8b95ad', font: {size: 11}},
                    grid: {color: 'rgba(255,255,255,0.04)'}, border: {display: false}}},
       plugins: {tooltip: {callbacks: {afterBody: (items) => {
         const idx = items[0].dataIndex, regime = r.regimes[idx];
@@ -2050,7 +2063,7 @@ function drawRegimeStrip(r) {
   const colorMap = {TRENDING:'#4c7bf3', MEAN_REVERTING:'#22c55e', HIGH_VOLATILITY:'#ef4444', CHOPPY:'#f59e0b'};
   const colW = w / n;
   r.regimes.forEach((regime, i) => {
-    ctx.fillStyle   = regime ? (colorMap[regime] || '#5a6480') : '#1e2535';
+    ctx.fillStyle   = regime ? (colorMap[regime] || '#8b95ad') : '#1e2535';
     ctx.globalAlpha = 0.7;
     ctx.fillRect(Math.floor(i * colW), 0, Math.max(1, Math.ceil(colW)), 18);
   });
@@ -2092,8 +2105,8 @@ function renderRegimeLatest(r) {
     html += '<div class="attrib-list">';
     attrib.forEach(a => {
       html += '<div class="attrib-item">' +
-        '<span class="attrib-feat">' + a.feature + '</span>' +
-        '<span class="attrib-reason">' + a.reason + '</span>' +
+        '<span class="attrib-feat">' + escHtml(a.feature) + '</span>' +
+        '<span class="attrib-reason">' + escHtml(a.reason) + '</span>' +
         '<span class="attrib-z">z = ' + (a.z >= 0 ? '+' : '') + Number(a.z).toFixed(2) + '</span></div>';
     });
     html += '</div>';
@@ -2137,7 +2150,7 @@ function renderFeatureChart(r) {
     data: {labels: dates, datasets},
     options: chartOpts({
       animation: false, interaction: {mode: 'index', intersect: false},
-      scales: {y: {min: 0, max: 1, ticks: {callback: v => v.toFixed(1), color: '#5a6480', font: {size: 11}},
+      scales: {y: {min: 0, max: 1, ticks: {callback: v => v.toFixed(1), color: '#8b95ad', font: {size: 11}},
                    grid: {color: 'rgba(255,255,255,0.04)'}, border: {display: false}}},
       plugins: {tooltip: {callbacks: {label: ctx =>
         ctx.dataset.label.split(' — ')[0] + ': ' +
@@ -2253,7 +2266,7 @@ async function initCompare() {
     const all = await res.json();
     const sel = document.getElementById('cmpStrategy');
     sel.innerHTML = all.filter(s => s.id !== 'custom')
-      .map(s => '<option value="' + s.id + '">' + s.label + '</option>').join('');
+      .map(s => '<option value="' + escHtml(s.id) + '">' + escHtml(s.label) + '</option>').join('');
     if (all.some(s => s.id === 'sma_crossover')) sel.value = 'sma_crossover';
   } catch {}
   // Wire ticker bar for the first ticker typed in the compare box.
@@ -2400,16 +2413,19 @@ let simChart = null, simVol = null;
 
 async function runSim() {
   const btn = document.getElementById('simBtn'), err = document.getElementById('simErr');
-  err.style.display = 'none'; btn.disabled = true; btn.textContent = 'Running…';
+  err.style.display = 'none';
+  document.getElementById('simOut').style.display = 'none';  // don't leave stale results above an error
+  btn.disabled = true; btn.textContent = 'Running…';
   try {
+    const clamp = (v, lo, hi, dflt) => Math.min(hi, Math.max(lo, Number(v) || dflt));
     const res = await fetch('/api/sim/run', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        steps: Number(document.getElementById('simSteps').value) || 400,
-        seed:  Number(document.getElementById('simSeed').value)  || 7,
+        steps: clamp(document.getElementById('simSteps').value, 50, 2000, 400),
+        seed:  Number(document.getElementById('simSeed').value) || 7,
       }),
     });
-    if (!res.ok) throw new Error('Simulation failed');
+    if (!res.ok) throw new Error((await res.json()).detail || 'Simulation failed');
     const d = await res.json();
     if (!d.bars || !d.bars.length) throw new Error('The market produced no trades.');
 
@@ -2437,18 +2453,33 @@ async function runSim() {
 
 async function runAgent() {
   const btn = document.getElementById('agBtn'), err = document.getElementById('agErr');
-  err.style.display = 'none'; btn.disabled = true; btn.textContent = 'Searching…';
+  err.style.display = 'none';
+  document.getElementById('agOut').style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Searching…';
   try {
+    const budget = Math.min(200, Math.max(5,
+      Number(document.getElementById('agBudget').value) || 40));
     const res = await fetch('/api/agent/search', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         ticker: document.getElementById('agTicker').value.trim() || 'AAPL',
-        budget: Number(document.getElementById('agBudget').value) || 40,
+        budget,
       }),
     });
-    if (!res.ok) throw new Error('Agent search failed');
+    if (!res.ok) throw new Error((await res.json()).detail || 'Agent search failed');
     const d = await res.json();
-    if (!d.found) throw new Error(d.reason || 'No strategy found.');
+    if (!d.found) {
+      // Finding nothing is a legitimate scientific result, not an error.
+      // Routing it to the red error box would teach users to read the honest
+      // outcome as a bug, which is the opposite of this feature's point.
+      document.getElementById('agOut').style.display = 'block';
+      document.getElementById('agMetrics').innerHTML = '';
+      const v = document.getElementById('agVerdict');
+      v.style.borderLeftColor = 'var(--amber)';
+      v.innerHTML = '<b style="color:var(--amber)">No strategy found</b><br>' +
+        escHtml(d.reason || 'The search produced nothing usable.');
+      return;
+    }
 
     const o = d.out_of_sample, c = d.critic;
     document.getElementById('agOut').style.display = 'block';
@@ -2505,6 +2536,21 @@ pollArena();
 setInterval(pollArena, 2000);
 initLab();
 aiInit();
+
+// Accessibility: announce async status changes to screen readers. Doing it in
+// one pass at boot keeps every error box and status line in sync instead of
+// relying on each one remembering to carry the attribute.
+document.querySelectorAll('.error').forEach(el => el.setAttribute('role', 'alert'));
+document.querySelectorAll('.rule-status, #arenaMsg, #tickerBar')
+  .forEach(el => el.setAttribute('aria-live', 'polite'));
+
+// Tab semantics, applied once rather than hand-written on six buttons.
+document.querySelectorAll('.tabbtn').forEach(btn => {
+  btn.setAttribute('role', 'tab');
+  btn.setAttribute('aria-selected', String(btn.classList.contains('active')));
+});
+document.querySelector('.tabnav')?.setAttribute('role', 'tablist');
+document.querySelectorAll('.tab-panel').forEach(p => p.setAttribute('role', 'tabpanel'));
 </script>
 </body>
 </html>

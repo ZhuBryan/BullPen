@@ -71,14 +71,24 @@ def expected_max_sharpe(n_trials: int, n_obs: int) -> float:
 
 
 def deflated_sharpe(sharpe: float, n_trials: int, n_obs: int,
-                    skew: float = 0.0, kurtosis: float = 3.0) -> float:
-    """Probability the true Sharpe is positive, after correcting for selection.
+                    skew: float = 0.0, kurtosis: float = 3.0,
+                    n_obs_trials: int | None = None) -> float:
+    """Probability the true Sharpe beats the selection-adjusted benchmark SR0.
+
+    Note it is P(true SR > SR0), NOT P(true SR > 0): the bar already includes
+    what luck would produce over `n_trials` attempts.
+
+    n_obs        length of the sample being scored.
+    n_obs_trials length of the sample the SEARCH ran on. The trial Sharpes whose
+                 maximum SR0 describes were estimated over that window, so the
+                 standard error in SR0 must use it. Defaults to n_obs, which is
+                 only correct when you searched and scored on the same data.
 
     Returns a value in [0, 1]. Above ~0.95 is the usual bar for "believable".
     """
     if n_obs < 3:
         return 0.0
-    sr0 = expected_max_sharpe(n_trials, n_obs)
+    sr0 = expected_max_sharpe(n_trials, n_obs_trials or n_obs)
     # Widen the uncertainty for skew and fat tails.
     denom = 1.0 - skew * sharpe + ((kurtosis - 1.0) / 4.0) * sharpe ** 2
     if denom <= 0:
@@ -102,13 +112,16 @@ def moments(returns):
     return mean / sd, skew, kurt
 
 
-def critique(returns, n_trials, threshold=0.95):
-    """The verdict, in numbers and in plain English."""
+def critique(returns, n_trials, threshold=0.95, n_obs_trials=None):
+    """The verdict, in numbers and in plain English.
+
+    n_obs_trials: length of the window the search ran on (see deflated_sharpe).
+    """
     n = len(returns)
     sr_obs, skew, kurt = moments(returns)
     sr_annual = sr_obs * math.sqrt(252)
-    dsr = deflated_sharpe(sr_obs, n_trials, n, skew, kurt)
-    bar = expected_max_sharpe(n_trials, n) * math.sqrt(252)
+    dsr = deflated_sharpe(sr_obs, n_trials, n, skew, kurt, n_obs_trials)
+    bar = expected_max_sharpe(n_trials, n_obs_trials or n) * math.sqrt(252)
     passed = dsr >= threshold and sr_annual > bar
 
     if passed:
@@ -152,18 +165,33 @@ class ResearchAgent:
         self.candidates = [s for s in STRATEGIES if STRATEGIES[s]["params"]]
 
     # ---- tools the agent can call -------------------------------------
+    def _sample(self, p):
+        """Draw one parameter, respecting whether it is integer or continuous.
+
+        Sampling Bollinger's num_std (0.5 to 4.0) with randint would floor the
+        range to 0..4 and can pick 0, which collapses the bands onto the moving
+        average and makes the strategy meaningless while still burning a trial.
+        """
+        lo, hi = p["min"], p["max"]
+        if isinstance(lo, float) or isinstance(hi, float) or isinstance(p["default"], float):
+            return round(self.rnd.uniform(float(lo), float(hi)), 3)
+        return self.rnd.randint(int(lo), int(hi))
+
     def propose(self):
         """Explore a random strategy, or exploit by nudging the best so far."""
         if self.best is None or self.rnd.random() < self.explore:
             sid = self.rnd.choice(self.candidates)
-            return sid, {p["name"]: self.rnd.randint(int(p["min"]), int(p["max"]))
-                         for p in STRATEGIES[sid]["params"]}
+            return sid, {p["name"]: self._sample(p) for p in STRATEGIES[sid]["params"]}
         sid, params = self.best["strategy"], dict(self.best["params"])
         spec = {p["name"]: p for p in STRATEGIES[sid]["params"]}
         for k in params:                      # jitter around the incumbent
-            lo, hi = int(spec[k]["min"]), int(spec[k]["max"])
-            span = max(1, (hi - lo) // 10)
-            params[k] = max(lo, min(hi, int(params[k]) + self.rnd.randint(-span, span)))
+            p = spec[k]
+            lo, hi = float(p["min"]), float(p["max"])
+            step = (hi - lo) / 10.0
+            nudged = float(params[k]) + self.rnd.uniform(-step, step)
+            nudged = max(lo, min(hi, nudged))
+            params[k] = (round(nudged, 3)
+                         if isinstance(p["default"], float) else int(round(nudged)))
         return sid, params
 
     def backtest(self, sid, params, prices):
@@ -199,7 +227,10 @@ class ResearchAgent:
             return {"found": False, "reason": "best strategy failed out of sample",
                     "trials": self.trials}
 
-        verdict = critique(_returns_from_equity(oos["equity"]), self.trials)
+        # The search ran on the training window, so the luck benchmark is sized
+        # on that length, not on the shorter held-out window being scored.
+        verdict = critique(_returns_from_equity(oos["equity"]), self.trials,
+                           n_obs_trials=len(self.train))
         return {
             "found": True,
             "strategy": self.best["strategy"],

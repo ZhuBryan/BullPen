@@ -65,9 +65,11 @@ class RestingOrder:
     """A limit order you posted, tracked through the queue."""
 
     def __init__(self, side, price, qty, ahead):
-        self.side, self.price, self.qty = side, float(price), int(qty)
+        # Quantities are FLOAT: this targets crypto, where 0.5 BTC is a normal
+        # order size and int() would silently round it to zero.
+        self.side, self.price, self.qty = side, float(price), float(qty)
         self.ahead = float(ahead)   # shares in front of you at your price
-        self.filled = 0
+        self.filled = 0.0
 
     @property
     def remaining(self):
@@ -95,15 +97,23 @@ class RestingOrder:
         if qty <= 0:
             return 0
 
-        got = int(min(self.remaining, qty))
+        got = min(self.remaining, qty)
         self.filled += got
         return got
 
 
 def queue_ahead(book, side, price):
-    """Shares already resting at `price` — everything that beats you in line."""
+    """Shares already resting at `price` — everything that beats you in line.
+
+    Must compare NUMERICALLY. The book keys prices as the raw exchange strings
+    ("68000.01000000"), so a dict lookup on str(68000.01) misses and silently
+    returns 0. Zero means "front of the queue", i.e. the most optimistic
+    assumption possible, which would quietly invert this module's entire claim
+    of being pessimistic. Getting this wrong is worse than having no model.
+    """
     levels = book.bids if side == BUY else book.asks
-    return float(levels.get(str(price), levels.get(f"{float(price):g}", 0)) or 0)
+    target = float(price)
+    return sum(float(q) for p, q in levels.items() if float(p) == target)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +209,23 @@ def demo():
     assert o.on_trade(100.0, 1000, buyer_is_maker=True) == 10
     assert o.on_trade(100.0, 1000, buyer_is_maker=True) == 0
     assert o.remaining == 0
+
+    # fractional sizes must survive (crypto: 0.5 BTC is a normal order)
+    o = RestingOrder(BUY, 100.0, 0.5, ahead=0)
+    assert o.on_trade(100.0, 0.3, buyer_is_maker=True) == 0.3, "fractional fill lost"
+    assert abs(o.remaining - 0.2) < 1e-12
+
+    # ---- queue_ahead must read REAL exchange-formatted book keys ----
+    b = DepthStream()
+    b.apply_snapshot({"lastUpdateId": 1,
+                      "bids": [["68000.01000000", "3.50000000"]],
+                      "asks": [["68000.02000000", "1.00000000"]]})
+    assert queue_ahead(b, BUY, 68000.01) == 3.5, "queue_ahead missed a real book key"
+    assert queue_ahead(b, SELL, 68000.02) == 1.0
+    assert queue_ahead(b, BUY, 12345.0) == 0.0, "absent price should be empty"
+    # and the value must actually flow into the fill model
+    o = RestingOrder(BUY, 68000.01, 1.0, ahead=queue_ahead(b, BUY, 68000.01))
+    assert o.on_trade(68000.01, 3.0, buyer_is_maker=True) == 0, "must still be queued"
 
     # ---- features ----
     b = DepthStream()

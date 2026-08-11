@@ -89,7 +89,9 @@ class Book:
 
     # ---- commands ------------------------------------------------------
     def limit(self, side, price, qty):
-        return self._submit(side, int(price), qty)
+        # Pass price through unconverted so _submit can reject a fractional one.
+        # Converting here would hide the very thing the check is looking for.
+        return self._submit(side, price, qty)
 
     def market(self, side, qty):
         return self._submit(side, None, qty)
@@ -112,6 +114,15 @@ class Book:
     def _submit(self, side, price, qty):
         if side not in (BUY, SELL) or qty <= 0:
             raise ValueError("bad order")
+        # Quantities and prices are integers (shares, ticks). Silently calling
+        # int() here would turn a 0.5 order into 0: accepted, never rested,
+        # never cancelled, and therefore missing from the shares ledger. Reject
+        # loudly instead, and make the caller choose a lot size.
+        if int(qty) != qty:
+            raise ValueError("qty must be a whole number of shares")
+        if price is not None and int(price) != price:
+            raise ValueError("price must be a whole number of ticks")
+        price = int(price) if price is not None else None
         o = Order(self._next_id, side, price, int(qty), int(qty))
         self._next_id += 1
         self.events.append(("accepted", o.id, side, price, qty))
@@ -265,6 +276,21 @@ def demo():
     trades = [e for e in b.events if e[0] == "trade"]
     assert len(trades) == 1 and trades[0][4] == alive, "filled a cancelled order"
     _check_invariants(b)
+
+    # fractional sizes must be refused, not silently truncated to zero
+    b = Book()
+    for bad in (0.5, 2.5):
+        try:
+            b.limit(BUY, 100, bad)
+            raise AssertionError(f"qty {bad} was silently accepted")
+        except ValueError:
+            pass
+    try:
+        b.limit(BUY, 100.9, 5)
+        raise AssertionError("fractional price was silently accepted")
+    except ValueError:
+        pass
+    assert b.best_bid() is None and not b.orders, "rejected orders left residue"
 
     # re-resting at a price whose level was fully cancelled
     b = Book()

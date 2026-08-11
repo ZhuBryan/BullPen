@@ -12,6 +12,7 @@ Everything returns a pandas DataFrame indexed by date with columns:
 """
 
 import hashlib
+import re
 import os
 from datetime import datetime
 
@@ -23,9 +24,21 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
+def _safe_part(value: str) -> str:
+    """Reduce a caller-supplied string to characters that cannot escape a path.
+
+    ticker/start/end all come from HTTP request bodies and all end up in a
+    filename that gets read from and written to. Replacing only "/" and "\\" is
+    not enough: ".." alone walks up a directory. Whitelist instead of blacklist.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
+    cleaned = cleaned.replace("..", "_")
+    return cleaned[:32] or "_"
+
+
 def _cache_path(ticker: str, start: str, end: str) -> str:
-    safe = ticker.upper().replace("/", "_").replace("\\", "_")
-    return os.path.join(DATA_DIR, f"{safe}_{start}_{end}.csv")
+    safe = _safe_part(ticker.upper())
+    return os.path.join(DATA_DIR, f"{safe}_{_safe_part(start)}_{_safe_part(end)}.csv")
 
 
 def _download_yfinance(ticker: str, start: str, end: str) -> pd.DataFrame | None:

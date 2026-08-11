@@ -16,12 +16,21 @@ Design choices:
     OpenAI-compatible local server (Ollama, LM Studio, vLLM, ...).
 """
 
+import ipaddress
 import json
 import re
-import urllib.request
+import socket
 import urllib.error
+import urllib.parse
+import urllib.request
 
 from backend.rules import validate_rules
+
+# Model names go into a URL path (Gemini) and a JSON body. Anything outside this
+# set is rejected rather than escaped, because a control character in a URL makes
+# http.client raise an error whose message contains the FULL url -- including the
+# API key -- and that message would then be returned to the caller.
+_MODEL_RE = re.compile(r"^[A-Za-z0-9._:\-/]{1,80}$")
 
 # The grammar we allow, handed to the model as its rulebook.
 GRAMMAR = (
@@ -57,6 +66,33 @@ class AIError(Exception):
     """A user-facing problem (bad key, provider down, unparseable reply)."""
 
 
+def _check_local_url(base_url: str) -> str:
+    """Allow a custom endpoint ONLY when it points at this machine.
+
+    `base_url` is user input. Without this check the server will happily POST to
+    any address the caller names -- cloud metadata endpoints, internal admin
+    ports, other hosts on the private network -- which is server-side request
+    forgery. Resolving the hostname first is what stops a public name that
+    resolves to 169.254.169.254 from sneaking through.
+    """
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise AIError("Local server URL must be a plain http(s) address.")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 80,
+                                   proto=socket.IPPROTO_TCP)
+    except OSError:
+        raise AIError("Could not resolve that local server URL.")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_loopback:
+            raise AIError(
+                "For safety the local model URL must point at this machine "
+                "(localhost or 127.0.0.1)."
+            )
+    return base_url.rstrip("/")
+
+
 def _post(url: str, headers: dict, payload: dict) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -64,64 +100,89 @@ def _post(url: str, headers: dict, payload: dict) -> dict:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        # Surface the provider's message but never echo the key.
-        body = ""
-        try:
-            body = e.read().decode("utf-8")[:400]
-        except Exception:
-            pass
+        # Deliberately do NOT echo the response body. It is attacker-controlled
+        # when base_url is, which would turn this into a readable SSRF oracle.
         if e.code in (401, 403):
             raise AIError("The provider rejected the API key (unauthorized).")
-        raise AIError(f"Provider error {e.code}: {body or e.reason}")
-    except urllib.error.URLError as e:
-        raise AIError(f"Could not reach the provider: {e.reason}")
-    except Exception as e:  # noqa: BLE001
-        raise AIError(f"Unexpected error calling the provider: {e}")
+        if e.code == 429:
+            raise AIError("The provider is rate limiting this key. Try again shortly.")
+        raise AIError(f"The provider returned an error (HTTP {e.code}).")
+    except urllib.error.URLError:
+        raise AIError("Could not reach the model provider.")
+    except json.JSONDecodeError:
+        raise AIError("The provider returned a response that was not JSON.")
+    except AIError:
+        raise
+    except Exception:  # noqa: BLE001
+        # Never interpolate the exception: for Gemini the key is in the URL and
+        # urllib puts the URL in the message.
+        raise AIError("Unexpected error calling the provider.")
 
 
 def _call_model(provider: str, api_key: str, model: str, base_url: str, user_msg: str) -> str:
     """Return the raw text the model produced (expected to be JSON)."""
     provider = (provider or "openai").lower()
+    if not _MODEL_RE.match(model or ""):
+        raise AIError("That model name contains characters that are not allowed.")
 
-    if provider == "anthropic":
-        out = _post(
-            "https://api.anthropic.com/v1/messages",
-            {"x-api-key": api_key, "anthropic-version": "2023-06-01",
-             "content-type": "application/json"},
-            {"model": model, "max_tokens": 400, "system": SYSTEM_PROMPT,
-             "messages": [{"role": "user", "content": user_msg}]},
-        )
-        return "".join(b.get("text", "") for b in out.get("content", []))
+    try:
+        if provider == "anthropic":
+            out = _post(
+                "https://api.anthropic.com/v1/messages",
+                {"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+                {"model": model, "max_tokens": 400, "system": SYSTEM_PROMPT,
+                 "messages": [{"role": "user", "content": user_msg}]},
+            )
+            return "".join(b.get("text", "") for b in out.get("content", []) or [])
 
-    if provider == "gemini":
-        url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{model}:generateContent?key={api_key}")
+        if provider == "gemini":
+            url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+                   f"{model}:generateContent"
+                   f"?key={urllib.parse.quote(api_key, safe='')}")
+            out = _post(
+                url, {"content-type": "application/json"},
+                {"system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                 "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+                 "generationConfig": {"temperature": 0.2,
+                                      "responseMimeType": "application/json"}},
+            )
+            cands = out.get("candidates") or []
+            if not cands:
+                raise AIError("The model returned no content.")
+            parts = cands[0].get("content", {}).get("parts") or []
+            return "".join(p.get("text", "") for p in parts)
+
+        # openai OR local/openai-compatible (Ollama, LM Studio, vLLM)
+        headers = {"content-type": "application/json"}
+        if provider == "local":
+            base = _check_local_url(base_url) if base_url else "http://localhost:11434/v1"
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+        else:
+            # A custom base_url is NOT honoured for cloud providers: it would
+            # send the user's API key to an arbitrary host of the caller's
+            # choosing. Only the local provider may redirect the endpoint.
+            base = "https://api.openai.com/v1"
+            headers["Authorization"] = f"Bearer {api_key}"
         out = _post(
-            url, {"content-type": "application/json"},
-            {"system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-             "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}},
+            f"{base}/chat/completions", headers,
+            {"model": model, "temperature": 0.2,
+             "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                          {"role": "user", "content": user_msg}]},
         )
-        cands = out.get("candidates", [])
-        if not cands:
+        choices = out.get("choices") or []
+        if not choices:
             raise AIError("The model returned no content.")
-        return "".join(p.get("text", "") for p in cands[0]["content"]["parts"])
-
-    # openai OR local/openai-compatible (Ollama, LM Studio, vLLM)
-    if provider == "local":
-        base = (base_url or "http://localhost:11434/v1").rstrip("/")
-    else:
-        base = (base_url or "https://api.openai.com/v1").rstrip("/")
-    headers = {"content-type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    out = _post(
-        f"{base}/chat/completions", headers,
-        {"model": model, "temperature": 0.2,
-         "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                      {"role": "user", "content": user_msg}]},
-    )
-    return out["choices"][0]["message"]["content"]
+        content = (choices[0].get("message") or {}).get("content")
+        if not content:
+            raise AIError("The model returned an empty reply.")
+        return content
+    except AIError:
+        raise
+    except (KeyError, IndexError, TypeError, AttributeError):
+        # A malformed provider payload must not surface as an unhandled 500.
+        raise AIError("The provider returned a response in an unexpected shape.")
 
 
 def _extract_json(text: str) -> dict:

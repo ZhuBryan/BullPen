@@ -38,6 +38,11 @@ def run_backtest(
         default so existing results stay comparable.
     Returns a dict with the equity curve, metrics, and trade log.
     """
+    if not starting_cash or starting_cash <= 0:
+        # Zero divides by zero three lines into the metrics; negative silently
+        # produces an inverted equity curve. Reject at the boundary instead.
+        raise ValueError("starting_cash must be greater than zero.")
+
     close = prices["Close"]
 
     # --- Step 1: avoid lookahead bias ---------------------------------
@@ -50,7 +55,11 @@ def run_backtest(
     cost_per_trade = commission_pct
     if realistic_fills:
         from backend.fills import estimate_costs
-        cost_per_trade = commission_pct + estimate_costs(prices, participation)
+        # `trades` is nonzero at bar i, but the fill happened at close[i-1], so
+        # the friction must be priced off bar i-1's range and volatility. Using
+        # bar i would charge a cost derived from data that did not exist yet.
+        cost_per_trade = commission_pct + estimate_costs(
+            prices, participation).shift(1).fillna(0.0)
     strat_ret = pos * stock_ret - trades * cost_per_trade
 
     # --- Step 3: equity curves ----------------------------------------
@@ -114,8 +123,14 @@ def run_backtest(
     # --- Step 5: trade log + win rate ----------------------------------
     # `pos` is already shifted, so pos[i]=1 means we were HOLDING during day i,
     # which means the buy happened at the close of day i-1. Reading close[i]
-    # here would report the wrong price and make win_rate disagree with the
-    # equity curve, so the fill price is the PREVIOUS close.
+    # here would report a price the trade never happened at, so the fill price
+    # is the PREVIOUS close.
+    #
+    # Note the trade log's return_pct is GROSS: it is exit/entry-1 with no
+    # commission or fill cost, while the equity curve is net of both. So
+    # win_rate_pct counts trades that were profitable before costs, and a
+    # strategy can show a high win rate and still lose money. That is a
+    # deliberate reporting choice, not a reconciliation bug.
     fill_price = close.shift(1)
     trade_log, entry_price, entry_date = [], None, None
     for date, p, prev in zip(close.index, pos, pos.shift(1).fillna(0)):

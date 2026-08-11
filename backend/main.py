@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.ai import AIError, translate as ai_translate
 from backend.analysis import optimize_strategy, walk_forward, monte_carlo
@@ -34,7 +34,9 @@ class BacktestRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    starting_cash: float = 10_000.0
+    # gt=0 so a zero or negative value is a clean 422 from the API layer
+    # instead of a ZeroDivisionError 500 deep inside the metrics.
+    starting_cash: float = Field(default=10_000.0, gt=0)
     regime_filter: Optional[str] = None
     realistic_fills: bool = False
     participation: float = 0.01
@@ -91,7 +93,9 @@ class OptimizeRequest(BaseModel):
     strategy: str = "sma_crossover"
     param_grid: dict = {}
     objective: str = "sharpe"
-    starting_cash: float = 10_000.0
+    # gt=0 so a zero or negative value is a clean 422 from the API layer
+    # instead of a ZeroDivisionError 500 deep inside the metrics.
+    starting_cash: float = Field(default=10_000.0, gt=0)
 
 
 class WalkForwardRequest(OptimizeRequest):
@@ -104,7 +108,9 @@ class MonteCarloRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    starting_cash: float = 10_000.0
+    # gt=0 so a zero or negative value is a clean 422 from the API layer
+    # instead of a ZeroDivisionError 500 deep inside the metrics.
+    starting_cash: float = Field(default=10_000.0, gt=0)
     n_sims: int = 500
 
 
@@ -114,7 +120,9 @@ class CompareRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    starting_cash: float = 10_000.0
+    # gt=0 so a zero or negative value is a clean 422 from the API layer
+    # instead of a ZeroDivisionError 500 deep inside the metrics.
+    starting_cash: float = Field(default=10_000.0, gt=0)
 
 
 @app.get("/")
@@ -691,7 +699,9 @@ class RegimeAttributionRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    starting_cash: float = 10_000.0
+    # gt=0 so a zero or negative value is a clean 422 from the API layer
+    # instead of a ZeroDivisionError 500 deep inside the metrics.
+    starting_cash: float = Field(default=10_000.0, gt=0)
     regime_filter: Optional[str] = None
 
 

@@ -53,7 +53,8 @@ class Agent:
     def __init__(self, name, cash=START_CASH):
         self.name = name
         self.cash = float(cash)
-        self.position = 0
+        self.start_cash = float(cash)  # PnL is measured against THIS agent's
+        self.position = 0              # own starting cash, not a global constant
         self.live: list[int] = []      # resting order ids
 
     def on_fill(self, side, price_ticks, qty):
@@ -252,7 +253,7 @@ class Simulation:
                   "position": a.position,
                   "cash": round(a.cash, 2),
                   "equity": round(a.equity(mark), 2),
-                  "pnl": round(a.equity(mark) - START_CASH, 2)}
+                  "pnl": round(a.equity(mark) - a.start_cash, 2)}
                  for a in self.agents],
                 key=lambda d: -d["pnl"]),
         }
@@ -289,6 +290,14 @@ def demo():
     # a market with no maker should barely trade: liquidity has to come from somewhere
     dry = Simulation(agents=[Noise("a"), Noise("b")], seed=3).run(200)
     assert dry["trades"] < out["trades"], "makers should increase traded volume"
+
+    # PnL must be measured against each agent's OWN starting cash, so agents
+    # funded differently still net to zero
+    mixed = Simulation(agents=[MarketMaker("rich", cash=500_000),
+                               Noise("poor", cash=1_000),
+                               Momentum("mid", cash=50_000)], seed=5).run(150)
+    assert abs(sum(a["pnl"] for a in mixed["agents"])) < 1e-6, \
+        "zero-sum broken when agents start with different cash"
 
     # inventory skew: a long maker must quote lower on BOTH sides than a flat one
     def quotes(pos):

@@ -51,6 +51,11 @@ except ImportError:                        # running this file directly
 EULER = 0.5772156649015329
 _N = NormalDist()
 
+# The best documented long-run track records sit near a Sharpe of 2-3, and even
+# the most extreme high-frequency desks are single digits. Above this, the input
+# is degenerate rather than exceptional.
+MAX_PLAUSIBLE_SHARPE = 10.0
+
 
 # ---------------------------------------------------------------------------
 # The critic
@@ -105,7 +110,11 @@ def moments(returns):
     mean = sum(returns) / n
     var = sum((r - mean) ** 2 for r in returns) / n
     sd = math.sqrt(var)
-    if sd == 0:
+    # Relative tolerance, not `sd == 0`. An exact-zero test misses a series that
+    # is merely near-constant (a smooth compounding curve), which then reports
+    # an astronomical Sharpe and sails past the critic. Manufacturing a false
+    # positive is the exact failure this module exists to prevent.
+    if sd <= 1e-12 * max(1.0, abs(mean)):
         return 0.0, 0.0, 3.0
     skew = sum(((r - mean) / sd) ** 3 for r in returns) / n
     kurt = sum(((r - mean) / sd) ** 4 for r in returns) / n
@@ -123,6 +132,22 @@ def critique(returns, n_trials, threshold=0.95, n_obs_trials=None):
     dsr = deflated_sharpe(sr_obs, n_trials, n, skew, kurt, n_obs_trials)
     bar = expected_max_sharpe(n_trials, n_obs_trials or n) * math.sqrt(252)
     passed = dsr >= threshold and sr_annual > bar
+
+    # Plausibility ceiling. A near-deterministic return series (a rounded
+    # compounding curve, a constant-return stub, a data bug) has minuscule
+    # variance and therefore an enormous but meaningless Sharpe -- one such
+    # input scored 20,000 and sailed through every statistical test here.
+    # No traded strategy achieves an annualized Sharpe above ~10, so anything
+    # beyond that is a broken input, not a discovery. Refusing to bless it is
+    # the whole reason this critic exists.
+    if not math.isfinite(sr_annual) or abs(sr_annual) > MAX_PLAUSIBLE_SHARPE:
+        return {"sharpe": round(sr_annual, 3) if math.isfinite(sr_annual) else None,
+                "deflated_sharpe": round(dsr, 4), "luck_benchmark": round(bar, 3),
+                "n_trials": n_trials, "n_obs": n, "skew": round(skew, 3),
+                "kurtosis": round(kurt, 3), "passed": False,
+                "reason": (f"Sharpe of {sr_annual:.1f} is not physically plausible. "
+                           "The return series is degenerate (near-zero variance), "
+                           "so this is a data problem, not an edge.")}
 
     if passed:
         reason = (f"Sharpe {sr_annual:.2f} clears the {bar:.2f} expected from "
@@ -303,6 +328,14 @@ def demo():
     # degenerate inputs must not explode
     assert critique([], 10)["deflated_sharpe"] == 0.0
     assert critique([0.0] * 50, 10)["sharpe"] == 0.0
+
+    # a near-deterministic curve has tiny variance and therefore an enormous
+    # Sharpe. It must be refused as degenerate, not celebrated.
+    eq = [round(10_000 * 1.0005 ** i, 2) for i in range(300)]
+    smooth = [eq[i] / eq[i - 1] - 1 for i in range(1, len(eq))]
+    v = critique(smooth, n_trials=5_000)
+    assert not v["passed"], f"near-constant series manufactured a pass: {v}"
+    assert "plausible" in v["reason"]
 
     # ---- end to end on real (or sample) prices ----
     from backend.data import get_prices

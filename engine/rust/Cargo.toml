@@ -1,0 +1,23 @@
+[package]
+name = "bullpen_engine"
+version = "0.1.0"
+edition = "2021"
+
+# No dependencies on purpose. The benchmark harness and the tests are written
+# against std only, so `cargo build` cannot fail on a crate that will not
+# resolve, and the numbers are not attributable to somebody else's code.
+[dependencies]
+
+[lib]
+name = "bullpen_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bullpen_engine"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# No panic = "abort": it conflicts with the test harness and buys nothing here.

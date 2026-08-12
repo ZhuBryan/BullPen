@@ -6,3 +6,7 @@ data/
 *.jsonl.gz
 *.parquet
 .DS_Store
+
+# Rust build artifacts
+rust/target/
+ops.txt

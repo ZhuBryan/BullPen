@@ -97,7 +97,9 @@ body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-
 .card::before{content:'';position:absolute;top:0;left:14px;right:14px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.07),transparent);pointer-events:none;}
 
 /* ---- Inputs / selects ---- */
-input,select,textarea{height:34px;padding:0 11px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);font-size:13px;width:100%;box-sizing:border-box;font-family:inherit;transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;}
+/* :not(checkbox/radio) so a checkbox added outside .feat-toggle does not render
+   as a full-width 34px box. */
+input:not([type="checkbox"]):not([type="radio"]),select,textarea{height:34px;padding:0 11px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);font-size:13px;width:100%;box-sizing:border-box;font-family:inherit;transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;}
 input:hover,select:hover,textarea:hover{border-color:#333e57;}
 textarea{height:auto;padding:9px 11px;resize:vertical;line-height:1.6;}
 input::placeholder,textarea::placeholder{color:var(--muted);}
@@ -225,7 +227,16 @@ details.cheat .chev{transition:transform 0.15s;}
 details.cheat[open] .chev{transform:rotate(90deg);}
 details.cheat .body{margin-top:12px;font-size:13px;color:var(--text);line-height:1.8;}
 details.cheat code{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:12px;font-family:'JetBrains Mono',monospace;}
-.copy-ex{color:var(--accent);cursor:pointer;text-decoration:underline dotted;}
+/* Real <button> for keyboard access, styled back down to inline text so the
+   cheat sheet still reads as prose. */
+.copy-ex{display:inline;height:auto;padding:0;background:none;border:none;box-shadow:none;
+  color:var(--accent);cursor:pointer;text-decoration:underline dotted;font:inherit;text-align:left;}
+.copy-ex:hover{background:none;filter:none;box-shadow:none;color:var(--accentH);}
+.copy-ex:focus-visible,details.cheat summary:focus-visible,.feat-toggle:focus-within,
+.chip:focus-visible,.emoji-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
+/* Disabled styling for the non-primary controls, which had none. */
+.ghost:disabled,.ghost-sm:disabled,.chip:disabled,.emoji-btn:disabled,.seg button:disabled{
+  opacity:.45;cursor:not-allowed;filter:none;}
 
 /* ---- Generic tables (analysis) ---- */
 table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -406,9 +417,9 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
             <code>CLOSE</code> · <code>SMA(n)</code> / <code>EMA(n)</code> · <code>RSI(n)</code> · <code>MOM(n)</code><br><br>
             <b>Examples</b> (click to fill the form):
             <ul style="margin:8px 0 0 16px;line-height:2">
-              <li><span class="copy-ex" data-buy="RSI(14) < 30 AND CLOSE > SMA(200)" data-sell="RSI(14) > 70">Dip buyer — buy <code>RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)</code>, sell <code>RSI(14) &gt; 70</code></span></li>
-              <li><span class="copy-ex" data-buy="SMA(20) > SMA(50)" data-sell="SMA(20) < SMA(50)">Trend follower — buy <code>SMA(20) &gt; SMA(50)</code>, sell <code>SMA(20) &lt; SMA(50)</code></span></li>
-              <li><span class="copy-ex" data-buy="CLOSE > 0" data-sell="CLOSE < 0">Buy &amp; hold — buy <code>CLOSE &gt; 0</code>, sell <code>CLOSE &lt; 0</code></span></li>
+              <li><button type="button" class="copy-ex" data-buy="RSI(14) < 30 AND CLOSE > SMA(200)" data-sell="RSI(14) > 70">Dip buyer — buy <code>RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)</code>, sell <code>RSI(14) &gt; 70</code></button></li>
+              <li><button type="button" class="copy-ex" data-buy="SMA(20) > SMA(50)" data-sell="SMA(20) < SMA(50)">Trend follower — buy <code>SMA(20) &gt; SMA(50)</code>, sell <code>SMA(20) &lt; SMA(50)</code></button></li>
+              <li><button type="button" class="copy-ex" data-buy="CLOSE > 0" data-sell="CLOSE < 0">Buy &amp; hold — buy <code>CLOSE &gt; 0</code>, sell <code>CLOSE &lt; 0</code></button></li>
             </ul>
           </div>
         </details>
@@ -441,8 +452,12 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
           </select>
         </div>
         <div class="field" style="margin-bottom:8px" id="aiKeyField">
-          <label for="aiKey">API key <span class="ai-hint">— kept in this browser only</span></label>
+          <label for="aiKey">API key
+            <span class="ai-hint">— stored in this browser, sent to the provider via this server, never saved server-side</span>
+          </label>
           <input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key">
+          <button type="button" class="ghost-sm" style="margin-top:6px;align-self:flex-start"
+                  onclick="aiForgetKey()">Forget key</button>
         </div>
         <div class="field" style="margin-bottom:8px;display:none" id="aiBaseField">
           <label for="aiBaseUrl">Local server URL</label>
@@ -884,7 +899,14 @@ function buildChips(containerId, buyInput, sellInput) {
   CHIP_TOKENS.forEach(tok => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'chip'; b.textContent = tok;
+    b.setAttribute('aria-label', 'Insert ' + tok);
+    // mousedown + preventDefault keeps focus (and the caret) in the rule input
+    // when clicking. But keyboard activation fires `click`, never `mousedown`,
+    // so binding only the latter left every chip unreachable by keyboard.
     b.addEventListener('mousedown', e => { e.preventDefault(); insertToken(target, tok); });
+    b.addEventListener('click', e => {
+      if (e.detail === 0) insertToken(target, tok);   // detail 0 = keyboard
+    });
     container.appendChild(b);
   });
 }
@@ -1288,7 +1310,9 @@ function renderLeaderboard(agents) {
       (a.return_pct >= 0 ? '+' : '') + Number(a.return_pct).toFixed(2) + '%</td>' +
     '<td style="text-align:right;font-family:\'JetBrains Mono\',monospace">$' + Number(a.equity).toFixed(2) + '</td>' +
     '<td style="text-align:right"><span class="pos-badge ' + (a.position === 'LONG' ? 'pos-long' : 'pos-cash') + '">' + a.position + '</span></td>' +
-    '<td>' + (a.is_default ? '' : '<button class="ghost-sm" onclick="deleteAgent(\'' + a.id + '\')">×</button>') + '</td>' +
+    '<td>' + (a.is_default ? '' :
+      '<button class="ghost-sm" aria-label="Remove ' + escHtml(a.name) + '"' +
+      ' onclick="deleteAgent(\'' + escHtml(a.id) + '\')">×</button>') + '</td>' +
     '</tr>'
   ).join('');
 }
@@ -1340,6 +1364,10 @@ async function pollArena() {
 }
 
 async function newSeason() {
+  // Destructive and irreversible: it discards the running season and every
+  // fighter's history. It sits next to a text field styled as a primary action,
+  // so it is easy to hit by accident.
+  if (!confirm('Start a new season?\n\nThis clears the current race and every fighter\'s history.')) return;
   const btn = document.getElementById('resetBtn');
   btn.disabled = true; btn.textContent = 'Resetting…';
   try {
@@ -1363,10 +1391,19 @@ function buildEmojiPicker() {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'emoji-btn' + (i === 0 ? ' selected' : '');
     b.textContent = e;
+    // role=radio + aria-checked: selection is currently signalled by border
+    // colour alone, which a screen reader cannot see.
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(i === 0));
+    b.setAttribute('aria-label', 'Emoji ' + e);
     b.addEventListener('click', () => {
       chosenEmoji = e;
-      row.querySelectorAll('.emoji-btn').forEach(x => x.classList.remove('selected'));
+      row.querySelectorAll('.emoji-btn').forEach(x => {
+        x.classList.remove('selected');
+        x.setAttribute('aria-checked', 'false');
+      });
       b.classList.add('selected');
+      b.setAttribute('aria-checked', 'true');
     });
     row.appendChild(b);
   });
@@ -1525,6 +1562,16 @@ function aiSyncProvider() {
   document.getElementById('aiKey').value = key;
 }
 
+// Clear the stored key for the current provider.
+function aiForgetKey() {
+  const p = document.getElementById('aiProvider').value;
+  try { localStorage.removeItem(aiKeyName(p)); } catch (e) {}
+  document.getElementById('aiKey').value = '';
+  const err = document.getElementById('aiErr');
+  err.textContent = 'Key cleared from this browser.';
+  err.style.display = 'block';
+}
+
 async function aiGenerate() {
   const btn = document.getElementById('aiBtn');
   const err = document.getElementById('aiErr');
@@ -1533,11 +1580,13 @@ async function aiGenerate() {
   if (!desc) { err.textContent = 'Describe the strategy first.'; err.style.display = 'block'; return; }
 
   const provider = document.getElementById('aiProvider').value;
+  const isLocal = provider === 'local';
   const body = {
     description: desc, provider,
-    api_key:  document.getElementById('aiKey').value.trim(),
+    // Don't ship a cloud key to a local model, or a local URL to a cloud one.
+    api_key:  isLocal ? '' : document.getElementById('aiKey').value.trim(),
     model:    document.getElementById('aiModel').value.trim(),
-    base_url: document.getElementById('aiBaseUrl').value.trim(),
+    base_url: isLocal ? document.getElementById('aiBaseUrl').value.trim() : '',
   };
   btn.disabled = true; btn.textContent = 'Generating…';
   try {
@@ -1745,6 +1794,11 @@ function parseValueList(input, label) {
 
 function buildParamGrid(prefix) {
   const s = anStrategies.find(x => x.id === document.getElementById('anStrategy').value);
+  // Without this guard a failed /api/strategies fetch surfaces to the user as
+  // "Cannot read properties of undefined (reading 'params')".
+  if (!s || !s.params || !s.params.length) {
+    throw new Error('Strategy list unavailable — reload the page and try again.');
+  }
   const p1 = s.params[0], p2 = s.params[1];
   const grid = {};
   grid[p1.name] = parseValueList(document.getElementById(prefix + 'Param1Values'), p1.label);

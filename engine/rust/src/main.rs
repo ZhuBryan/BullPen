@@ -37,7 +37,8 @@ impl Lcg {
 enum Op {
     Limit(Side, i64, i64),
     Market(Side, i64),
-    Cancel,
+    Cancel,          // cancel whatever this run most recently rested
+    CancelId(u64),   // cancel a specific id, used when replaying an op file
 }
 
 fn make_stream(n: usize, seed: u64) -> Vec<Op> {
@@ -76,9 +77,35 @@ fn run_stream(ops: &[Op]) -> Book {
                     book.cancel(id);
                 }
             }
+            Op::CancelId(id) => {
+                book.cancel(id);
+            }
         }
     }
     book
+}
+
+/// Parse the shared op-file format so both engines can be benchmarked on
+/// byte-identical input. Generating a stream separately in each language makes
+/// the workloads merely similar, which is not good enough to quote a ratio.
+fn load_ops(path: &str) -> Vec<Op> {
+    let text = fs::read_to_string(path).expect("could not read op file");
+    let mut ops = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let f: Vec<&str> = line.split_whitespace().collect();
+        let side = |s: &str| if s == "B" { Side::Buy } else { Side::Sell };
+        match f[0] {
+            "L" => ops.push(Op::Limit(side(f[1]), f[2].parse().unwrap(), f[3].parse().unwrap())),
+            "M" => ops.push(Op::Market(side(f[1]), f[2].parse().unwrap())),
+            "X" => ops.push(Op::CancelId(f[1].parse().unwrap())),
+            other => panic!("unknown op {}", other),
+        }
+    }
+    ops
 }
 
 fn timer_overhead(samples: usize) -> u128 {
@@ -92,18 +119,27 @@ fn timer_overhead(samples: usize) -> u128 {
     v[v.len() / 2]
 }
 
-fn bench(n: usize, warmup: usize) {
+fn bench(ops_in: Option<Vec<Op>>, n: usize, warmup: usize) {
     println!("warmup {} ops (discarded)", warmup);
     let _ = run_stream(&make_stream(warmup, 1));
 
     let oh = timer_overhead(20_000);
-    println!(
-        "timer overhead (median): {} ns - treat anything near this as noise\n",
-        oh
-    );
+    println!("timer overhead (median): {} ns", oh);
+    if oh == 0 {
+        println!("  NOTE: the clock cannot resolve two back-to-back calls here.");
+        println!("  Windows QueryPerformanceCounter ticks at roughly 100ns, so any");
+        println!("  per-op figure near that is at the measurement floor. The");
+        println!("  throughput number below does not use a per-op timer and is");
+        println!("  therefore the more trustworthy one.");
+    }
+    println!();
+
+    let n = ops_in.as_ref().map(|v| v.len()).unwrap_or(n);
+    let source = if ops_in.is_some() { "op file" } else { "generated" };
+    println!("workload: {} ({} ops)\n", source, n);
 
     // --- throughput: no per-op timing, so no timer cost in the number ---
-    let ops = make_stream(n, 42);
+    let ops = ops_in.clone().unwrap_or_else(|| make_stream(n, 42));
     let t0 = Instant::now();
     let book = run_stream(&ops);
     let elapsed = t0.elapsed();
@@ -117,7 +153,6 @@ fn bench(n: usize, warmup: usize) {
     println!("            {} events emitted\n", book.events.len());
 
     // --- latency percentiles: each op timed individually ---
-    let ops = make_stream(n, 42);
     let mut book = Book::new();
     let mut live: Vec<u64> = Vec::new();
     let mut lat: Vec<u128> = Vec::with_capacity(n);
@@ -134,6 +169,9 @@ fn bench(n: usize, warmup: usize) {
                 } else {
                     continue;
                 }
+            }
+            Op::CancelId(id) => {
+                book.cancel(id);
             }
         }
         lat.push(t.elapsed().as_nanos());
@@ -191,11 +229,15 @@ fn main() {
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("bench");
     match mode {
         "bench" => {
-            let n = args
-                .get(2)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(200_000usize);
-            bench(n, 20_000);
+            // `bench <n>` generates a stream; `bench <file>` replays a shared
+            // op file so Python and Rust are measured on identical work.
+            match args.get(2) {
+                Some(a) => match a.parse::<usize>() {
+                    Ok(n) => bench(None, n, 20_000),
+                    Err(_) => bench(Some(load_ops(a)), 0, 20_000),
+                },
+                None => bench(None, 200_000, 20_000),
+            }
         }
         "replay" => {
             let path = args.get(2).expect("usage: replay <ops file>");

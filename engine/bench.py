@@ -50,6 +50,28 @@ def make_stream(n, seed=42, mid=10_000, spread=2, cancel_rate=0.15, market_rate=
     return ops
 
 
+def load_ops(path):
+    """Read the shared op-file format used by diff_test.py and the Rust binary.
+
+    Benchmarking two engines on separately generated streams makes the
+    workloads merely similar. Feeding both the same file is what makes a
+    quoted ratio defensible.
+    """
+    ops = []
+    for line in open(path):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        f = line.split()
+        if f[0] == "L":
+            ops.append(("limit", BUY if f[1] == "B" else SELL, int(f[2]), int(f[3])))
+        elif f[0] == "M":
+            ops.append(("market", BUY if f[1] == "B" else SELL, None, int(f[2])))
+        elif f[0] == "X":
+            ops.append(("cancel_id", None, None, int(f[1])))
+    return ops
+
+
 def _run(book, ops, live):
     """Execute one op; returns nothing. Split out so both timing modes agree."""
     for kind, side, price, qty in ops:
@@ -57,6 +79,8 @@ def _run(book, ops, live):
             live.append(book.limit(side, price, qty))
         elif kind == "market":
             book.market(side, qty)
+        elif kind == "cancel_id":
+            book.cancel(qty)          # qty carries the order id in file mode
         elif live:
             book.cancel(live.pop() if len(live) % 2 else live.pop(0))
 
@@ -72,8 +96,9 @@ def timer_overhead(samples=20_000):
     return t[len(t) // 2]
 
 
-def bench_throughput(n, seed=42):
-    ops = make_stream(n, seed)
+def bench_throughput(n, seed=42, ops=None):
+    ops = ops if ops is not None else make_stream(n, seed)
+    n = len(ops)
     book, live = Book(), []
     start = time.perf_counter_ns()
     _run(book, ops, live)
@@ -87,8 +112,8 @@ def bench_throughput(n, seed=42):
     }
 
 
-def bench_latency(n, seed=42):
-    ops = make_stream(n, seed)
+def bench_latency(n, seed=42, ops=None):
+    ops = ops if ops is not None else make_stream(n, seed)
     book, live, lat = Book(), [], []
     for kind, side, price, qty in ops:
         t0 = time.perf_counter_ns()
@@ -97,6 +122,8 @@ def bench_latency(n, seed=42):
             live.append(oid)
         elif kind == "market":
             book.market(side, qty)
+        elif kind == "cancel_id":
+            book.cancel(qty)
         elif live:
             book.cancel(live.pop())
         else:
@@ -139,6 +166,7 @@ def main():
     ap.add_argument("--n", type=int, default=200_000)
     ap.add_argument("--warmup", type=int, default=20_000)
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument("--ops", help="replay a shared op file instead of generating a stream")
     a = ap.parse_args()
     n = 20_000 if a.quick else a.n
     warm = 5_000 if a.quick else a.warmup
@@ -149,12 +177,16 @@ def main():
     oh = timer_overhead(2_000 if a.quick else 20_000)
     print(f"timer overhead (median): {oh} ns — treat anything near this as noise\n")
 
-    t = bench_throughput(n)
+    file_ops = load_ops(a.ops) if a.ops else None
+    if file_ops:
+        n = len(file_ops)
+        print(f"workload: op file {a.ops} ({n:,} ops)\n")
+    t = bench_throughput(n, ops=file_ops)
     print(f"THROUGHPUT  {t['ops']:,} ops in {t['seconds']:.3f}s")
     print(f"            {t['ops_per_sec']:,.0f} ops/sec  ({t['ns_per_op']:.0f} ns/op)")
     print(f"            {t['events']:,} events emitted\n")
 
-    l = bench_latency(n)
+    l = bench_latency(n, ops=file_ops)
     print(f"LATENCY     per-op, timed individually (n={l['n']:,})")
     for k in ("p50", "p90", "p99", "p999", "max"):
         print(f"            {k:>5}: {l[k]:>9,} ns")

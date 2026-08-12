@@ -34,8 +34,16 @@
   --red:      #ef4444;
   --amber:    #f59e0b;
   --gold:     #eab308;
+  /* Spacing scale. Every gap should come from here rather than an ad-hoc pixel
+     value, which is what makes rhythm feel deliberate instead of arbitrary. */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px;
+  /* Type scale. */
+  --t-xs: 11px; --t-sm: 12px; --t-base: 13px; --t-md: 14px;
+  --t-lg: 16px; --t-xl: 20px; --t-2xl: 26px;
+  --r-xs:     4px;
   --r:        11px;
   --r-sm:     8px;
+  --r-pill:   100px;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.45);
   --shadow:    0 6px 24px -6px rgba(0,0,0,0.55);
   --shadow-lg: 0 16px 48px -12px rgba(0,0,0,0.65);
@@ -857,11 +865,32 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
 
 <script>
 /* =====================================================================
+   DESIGN TOKENS, read from CSS
+   ---------------------------------------------------------------------
+   Chart.js needs real colour strings, not var(--x), so these used to be
+   hardcoded hexes in the JS. They drifted: the tooltip background and three
+   text greys no longer matched any token after the palette was retuned.
+   Reading the values from the stylesheet once at boot means there is exactly
+   one place a colour is defined.
+   ===================================================================== */
+const TOKENS = (() => {
+  const cs = getComputedStyle(document.documentElement);
+  const v = n => cs.getPropertyValue(n).trim();
+  return {
+    accent: v('--accent'), accentH: v('--accentH'),
+    green: v('--green'), red: v('--red'), amber: v('--amber'),
+    text: v('--text'), text2: v('--text2'), muted: v('--muted'),
+    surface: v('--surface'), surface2: v('--surface2'),
+    border: v('--border'), border2: v('--border2'),
+  };
+})();
+
+/* =====================================================================
    SHARED HELPERS
    ===================================================================== */
 
 // One distinct color per agent/ticker, handed out in order of first sighting.
-const PALETTE = ['#4c7bf3','#22c55e','#ef4444','#f59e0b','#a855f7',
+const PALETTE = [TOKENS.accent,TOKENS.green,TOKENS.red,TOKENS.amber,'#a855f7',
                  '#06b6d4','#f97316','#84cc16','#ec4899','#8b5cf6',
                  '#14b8a6','#f43f5e'];
 const agentColors = {};
@@ -986,14 +1015,14 @@ const CHART_DEFAULTS = {
   plugins: {
     legend: {display: false},
     tooltip: {
-      backgroundColor: '#1a2035', borderColor: '#2a3347', borderWidth: 1,
-      padding: {x: 12, y: 8}, titleColor: '#c9d1e0', bodyColor: '#8a94aa',
+      backgroundColor: TOKENS.surface2, borderColor: TOKENS.border2, borderWidth: 1,
+      padding: {x: 12, y: 8}, titleColor: TOKENS.text, bodyColor: TOKENS.text2,
       titleFont: {size: 12, weight: '500'}, bodyFont: {size: 11},
     }
   },
   scales: {
-    x: {grid: {display: false}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
-    y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 6}, border: {display: false}}
+    x: {grid: {display: false}, ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
+    y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 6}, border: {display: false}}
   }
 };
 
@@ -1021,7 +1050,7 @@ function chartOpts(overrides) {
    them ourselves in a small plugin. A hidden close-price line drives the
    axes and tooltips; the plugin paints the candles on top.
    ===================================================================== */
-const C_UP = '#22c55e', C_DOWN = '#ef4444';
+const C_UP = TOKENS.green, C_DOWN = TOKENS.red;
 
 // "#rrggbb" + alpha  ->  "rgba(r,g,b,a)". Used for translucent fills.
 function rgba(hex, a) {
@@ -1108,7 +1137,7 @@ function makePriceChart(canvasId, labels, candles, markers, mode) {
     type: 'line',
     data: {labels, datasets: [{
       label: 'Close', data: candles.map(c => c.c),
-      borderColor: '#4c7bf3', backgroundColor: areaFill('#4c7bf3'),
+      borderColor: TOKENS.accent, backgroundColor: areaFill(TOKENS.accent),
       borderWidth: 1.6, pointRadius: 0, pointHitRadius: 6,
       fill: true, tension: 0.25, cubicInterpolationMode: 'monotone',
     }]},
@@ -1116,10 +1145,10 @@ function makePriceChart(canvasId, labels, candles, markers, mode) {
       animation: false,
       interaction: {mode: 'index', intersect: false},
       scales: {
-        x: {grid: {display: false}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
+        x: {grid: {display: false}, ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
         y: {position: 'right', min: lo - pad, max: hi + pad,
             grid: {color: 'rgba(255,255,255,0.04)'},
-            ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 6, callback: v => '$' + Number(v).toFixed(0)},
+            ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 6, callback: v => '$' + Number(v).toFixed(0)},
             border: {display: false}},
       },
       plugins: {
@@ -1269,13 +1298,13 @@ function makeArenaChart() {
       animation: false,
       interaction: {mode: 'index', intersect: false},
       plugins: {
-        legend: {display: true, labels: {color: '#c9d1e0', boxWidth: 16, font: {size: 12}}},
+        legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}},
         tooltip: {callbacks: {label: ctx => ctx.dataset.label + ': $' +
           Number(ctx.parsed.y).toLocaleString(undefined, {maximumFractionDigits: 0})}}
       },
       scales: {
-        x: {grid: {display: false}, ticks: {color: '#8b95ad', font: {size: 11}, maxTicksLimit: 10}, border: {display: false}},
-        y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#8b95ad', font: {size: 11}, callback: v => '$' + Number(v).toLocaleString()}, border: {display: false}}
+        x: {grid: {display: false}, ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 10}, border: {display: false}},
+        y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: TOKENS.muted, font: {size: 11}, callback: v => '$' + Number(v).toLocaleString()}, border: {display: false}}
       }
     })
   });
@@ -1649,18 +1678,18 @@ function render(r) {
   }
 
   const lineOpts = chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-    plugins: {legend: {display: true, labels: {color: '#c9d1e0', boxWidth: 16, font: {size: 12}}}}});
+    plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}});
 
   if (equityChart) equityChart.destroy();
   equityChart = new Chart(document.getElementById('equityChart'), {
     type: 'line',
     data: {labels: r.dates, datasets: [
       {label: r.strategy + ' (' + r.ticker + ')', data: r.equity,
-       borderColor: '#22c55e', backgroundColor: areaFill('#22c55e'),
+       borderColor: TOKENS.green, backgroundColor: areaFill(TOKENS.green),
        fill: true, borderWidth: 2, pointRadius: 0,
        tension: 0.25, cubicInterpolationMode: 'monotone'},
       {label: 'Buy & Hold', data: r.buy_hold,
-       borderColor: '#4c7bf3', borderWidth: 1.5, pointRadius: 0, borderDash: [6,4],
+       borderColor: TOKENS.accent, borderWidth: 1.5, pointRadius: 0, borderDash: [6,4],
        tension: 0.25, cubicInterpolationMode: 'monotone'},
     ]},
     options: lineOpts,
@@ -1671,7 +1700,7 @@ function render(r) {
     type: 'line',
     data: {labels: r.dates, datasets: [
       {label: 'Drawdown %', data: r.drawdown_pct,
-       borderColor: '#ef4444', backgroundColor: areaFill('#ef4444'),
+       borderColor: TOKENS.red, backgroundColor: areaFill(TOKENS.red),
        fill: true, borderWidth: 1.5, pointRadius: 0,
        tension: 0.25, cubicInterpolationMode: 'monotone'},
     ]},
@@ -1870,8 +1899,8 @@ function renderOptimize(r) {
       const val    = metricFor(v1, v2);
       const isBest = r.best.params[p1name] === v1 && (!p2name || r.best.params[p2name] === v2);
       let bg = 'transparent';
-      if (val !== null && hi > lo) bg = lerpColor('#1e2535','#4c7bf3', (val - lo) / (hi - lo));
-      else if (val !== null) bg = '#1e2535';
+      if (val !== null && hi > lo) bg = lerpColor(TOKENS.border,TOKENS.accent, (val - lo) / (hi - lo));
+      else if (val !== null) bg = TOKENS.border;
       html += '<td class="heatmap-cell' + (isBest ? ' best' : '') + '" style="background-color:' + bg + '">' +
               (val === null ? '—' : Number(val).toFixed(2)) + '</td>';
     });
@@ -1929,15 +1958,15 @@ function renderWalkForward(r) {
     makeMCard('Final equity','$' + m.final_equity.toLocaleString(), beat ? 'pos' : 'neg'),
   ].join('');
   const lineOpts = chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-    plugins: {legend: {display: true, labels: {color: '#c9d1e0', boxWidth: 16, font: {size: 12}}}}});
+    plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}});
   if (wfChart) wfChart.destroy();
   wfChart = new Chart(document.getElementById('wfChart'), {
     type: 'line',
     data: {labels: r.combined.dates, datasets: [
       {label: 'Out-of-sample equity', data: r.combined.equity,
-       borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.07)', fill: true, borderWidth: 2, pointRadius: 0},
+       borderColor: TOKENS.green, backgroundColor: 'rgba(34,197,94,0.07)', fill: true, borderWidth: 2, pointRadius: 0},
       {label: 'Buy & Hold', data: r.combined.buy_hold,
-       borderColor: '#4c7bf3', borderWidth: 1.5, pointRadius: 0, borderDash: [6,4]},
+       borderColor: TOKENS.accent, borderWidth: 1.5, pointRadius: 0, borderDash: [6,4]},
     ]},
     options: lineOpts,
   });
@@ -1991,12 +2020,12 @@ function renderMonteCarlo(r) {
     data: {labels: b.day, datasets: [
       {label: '95th percentile', data: b.p95, borderColor: 'rgba(76,123,243,0.35)', borderWidth: 1, pointRadius: 0, fill: '+1'},
       {label: '75th percentile', data: b.p75, borderColor: 'rgba(76,123,243,0.6)',  backgroundColor: 'rgba(76,123,243,0.1)', borderWidth: 1, pointRadius: 0, fill: '+1'},
-      {label: 'Median (50th)',   data: b.p50, borderColor: '#4c7bf3', borderWidth: 2, pointRadius: 0, fill: false},
+      {label: 'Median (50th)',   data: b.p50, borderColor: TOKENS.accent, borderWidth: 2, pointRadius: 0, fill: false},
       {label: '25th percentile', data: b.p25, borderColor: 'rgba(76,123,243,0.6)',  backgroundColor: 'rgba(76,123,243,0.1)', borderWidth: 1, pointRadius: 0, fill: '-1'},
       {label: '5th percentile',  data: b.p5,  borderColor: 'rgba(76,123,243,0.35)', borderWidth: 1, pointRadius: 0, fill: false},
     ]},
     options: chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, labels: {color: '#c9d1e0', boxWidth: 16, font: {size: 12}}}}}),
+      plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
   });
 }
 
@@ -2007,10 +2036,10 @@ let regimeChart = null, regFeatChart = null, regBtChart = null;
 let regStrategiesLoaded = false;
 
 const REGIME_COLORS = {
-  TRENDING:        '#4c7bf3',
-  MEAN_REVERTING:  '#22c55e',
-  HIGH_VOLATILITY: '#ef4444',
-  CHOPPY:          '#f59e0b',
+  TRENDING:        TOKENS.accent,
+  MEAN_REVERTING:  TOKENS.green,
+  HIGH_VOLATILITY: TOKENS.red,
+  CHOPPY:          TOKENS.amber,
 };
 const REGIME_NAMES = {
   TRENDING:        'Trending',
@@ -2020,10 +2049,10 @@ const REGIME_NAMES = {
 };
 
 const FEAT_META = [
-  {key: 'vol_20',      label: 'vol_20',      desc: 'Annualized volatility over 20 days',                       color: '#ef4444'},
-  {key: 'trend_20',    label: 'trend_20',    desc: 'Directional slope of prices over 20 days (OLS fit)',        color: '#4c7bf3'},
-  {key: 'autocorr_10', label: 'autocorr_10', desc: "Momentum persistence — do today's gains predict tomorrow's?", color: '#22c55e'},
-  {key: 'hurst',       label: 'hurst',       desc: 'Hurst exponent: >0.5 trending, <0.5 mean-reverting',       color: '#f59e0b'},
+  {key: 'vol_20',      label: 'vol_20',      desc: 'Annualized volatility over 20 days',                       color: TOKENS.red},
+  {key: 'trend_20',    label: 'trend_20',    desc: 'Directional slope of prices over 20 days (OLS fit)',        color: TOKENS.accent},
+  {key: 'autocorr_10', label: 'autocorr_10', desc: "Momentum persistence — do today's gains predict tomorrow's?", color: TOKENS.green},
+  {key: 'hurst',       label: 'hurst',       desc: 'Hurst exponent: >0.5 trending, <0.5 mean-reverting',       color: TOKENS.amber},
   {key: 'drawdown_20', label: 'drawdown_20', desc: 'Distance below the 20-day peak',                           color: '#a855f7'},
 ];
 
@@ -2092,12 +2121,12 @@ function renderRegimeChart(r) {
     type: 'line',
     data: {labels: r.dates, datasets: [{
       label: r.ticker + ' Close', data: r.prices,
-      borderColor: '#4c7bf3', backgroundColor: 'rgba(76,123,243,0.06)',
+      borderColor: TOKENS.accent, backgroundColor: 'rgba(76,123,243,0.06)',
       fill: true, borderWidth: 2, pointRadius: 0, tension: 0.1,
     }]},
     options: chartOpts({
       animation: false, interaction: {mode: 'index', intersect: false},
-      scales: {y: {ticks: {callback: v => '$' + Number(v).toFixed(0), color: '#8b95ad', font: {size: 11}},
+      scales: {y: {ticks: {callback: v => '$' + Number(v).toFixed(0), color: TOKENS.muted, font: {size: 11}},
                    grid: {color: 'rgba(255,255,255,0.04)'}, border: {display: false}}},
       plugins: {tooltip: {callbacks: {afterBody: (items) => {
         const idx = items[0].dataIndex, regime = r.regimes[idx];
@@ -2114,10 +2143,10 @@ function drawRegimeStrip(r) {
   const w = canvas.offsetWidth || canvas.parentElement.offsetWidth || 800;
   canvas.width = w; canvas.height = 18;
   const ctx = canvas.getContext('2d');
-  const colorMap = {TRENDING:'#4c7bf3', MEAN_REVERTING:'#22c55e', HIGH_VOLATILITY:'#ef4444', CHOPPY:'#f59e0b'};
+  const colorMap = {TRENDING:TOKENS.accent, MEAN_REVERTING:TOKENS.green, HIGH_VOLATILITY:TOKENS.red, CHOPPY:TOKENS.amber};
   const colW = w / n;
   r.regimes.forEach((regime, i) => {
-    ctx.fillStyle   = regime ? (colorMap[regime] || '#8b95ad') : '#1e2535';
+    ctx.fillStyle   = regime ? (colorMap[regime] || TOKENS.muted) : TOKENS.border;
     ctx.globalAlpha = 0.7;
     ctx.fillRect(Math.floor(i * colW), 0, Math.max(1, Math.ceil(colW)), 18);
   });
@@ -2204,7 +2233,7 @@ function renderFeatureChart(r) {
     data: {labels: dates, datasets},
     options: chartOpts({
       animation: false, interaction: {mode: 'index', intersect: false},
-      scales: {y: {min: 0, max: 1, ticks: {callback: v => v.toFixed(1), color: '#8b95ad', font: {size: 11}},
+      scales: {y: {min: 0, max: 1, ticks: {callback: v => v.toFixed(1), color: TOKENS.muted, font: {size: 11}},
                    grid: {color: 'rgba(255,255,255,0.04)'}, border: {display: false}}},
       plugins: {tooltip: {callbacks: {label: ctx =>
         ctx.dataset.label.split(' — ')[0] + ': ' +
@@ -2300,12 +2329,12 @@ function renderRegimeBacktest(r, filter) {
     type: 'line',
     data: {labels: r.dates, datasets: [
       {label: r.strategy + ' (gated: ' + REGIME_NAMES[filter] + ')', data: r.equity,
-       borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.07)', fill: true, borderWidth: 2, pointRadius: 0},
+       borderColor: TOKENS.green, backgroundColor: 'rgba(34,197,94,0.07)', fill: true, borderWidth: 2, pointRadius: 0},
       {label: 'Buy & Hold (unfiltered)', data: r.buy_hold,
-       borderColor: '#4c7bf3', borderWidth: 1.5, pointRadius: 0, borderDash: [6,4]},
+       borderColor: TOKENS.accent, borderWidth: 1.5, pointRadius: 0, borderDash: [6,4]},
     ]},
     options: chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, labels: {color: '#c9d1e0', boxWidth: 16, font: {size: 12}}}}}),
+      plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
   });
 }
 
@@ -2384,7 +2413,7 @@ function renderCompare(r) {
     type: 'line',
     data: {labels: r.dates, datasets},
     options: chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, labels: {color: '#c9d1e0', boxWidth: 16, font: {size: 12}}}}}),
+      plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
   });
 
   document.getElementById('cmpTable').innerHTML =
@@ -2587,7 +2616,13 @@ document.querySelectorAll('.copy-ex').forEach(el => {
 
 showArenaMessage('Connecting to the arena…');
 pollArena();
-setInterval(pollArena, 2000);
+// Only poll while the Arena is actually on screen. Otherwise the app keeps
+// fetching and calling Chart.update() on a hidden canvas every 2 seconds for
+// the whole session, including in a background tab.
+setInterval(() => {
+  const visible = document.getElementById('tabArena').style.display !== 'none';
+  if (visible && !document.hidden) pollArena();
+}, 2000);
 initLab();
 aiInit();
 

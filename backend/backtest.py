@@ -131,18 +131,22 @@ def run_backtest(
     # win_rate_pct counts trades that were profitable before costs, and a
     # strategy can show a high win rate and still lose money. That is a
     # deliberate reporting choice, not a reconciliation bug.
+    # Positional access, not .loc: a duplicated date in a hand-edited cache CSV
+    # makes label lookup return a Series and blow up inside pd.isna().
     fill_price = close.shift(1)
     trade_log, entry_price, entry_date = [], None, None
-    for date, p, prev in zip(close.index, pos, pos.shift(1).fillna(0)):
+    prev_pos = pos.shift(1).fillna(0)
+    for i, date in enumerate(close.index):
+        p, prev = pos.iloc[i], prev_pos.iloc[i]
         if p == 1 and prev == 0:  # entered
-            px = fill_price.loc[date]
-            if pd.isna(px):       # position open on the very first bar
-                px = close.loc[date]
+            px = fill_price.iloc[i]
+            if pd.isna(px):       # no prior bar to fill against
+                px = close.iloc[i]
             entry_price, entry_date = px, date
         elif p == 0 and prev == 1 and entry_price is not None:  # exited
-            exit_price = fill_price.loc[date]
+            exit_price = fill_price.iloc[i]
             if pd.isna(exit_price):
-                exit_price = close.loc[date]
+                exit_price = close.iloc[i]
             trade_log.append({
                 "entry_date": str(entry_date.date()),
                 "exit_date": str(date.date()),

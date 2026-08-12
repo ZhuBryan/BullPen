@@ -201,13 +201,22 @@ class Simulation:
         return prices
 
     def _check(self):
+        """Enforce the closed-economy invariants.
+
+        These raise instead of assert on purpose: `python -O` strips assert
+        statements, so an optimized deployment would run with every safety
+        check silently removed. An invariant you only check in debug builds is
+        not an invariant.
+        """
         pos = sum(a.position for a in self.agents)
-        assert pos == 0, f"shares created from nothing: net position {pos}"
+        if pos != 0:
+            raise RuntimeError(f"shares created from nothing: net position {pos}")
         cash = sum(a.cash for a in self.agents)
-        assert abs(cash - self._start_cash) < 1e-6, (
-            f"money created: {cash:.4f} != {self._start_cash:.4f}")
+        if abs(cash - self._start_cash) >= 1e-6:
+            raise RuntimeError(f"money created: {cash:.4f} != {self._start_cash:.4f}")
         bb, ba = self.book.best_bid(), self.book.best_ask()
-        assert bb is None or ba is None or bb < ba, f"crossed book {bb}/{ba}"
+        if bb is not None and ba is not None and bb >= ba:
+            raise RuntimeError(f"crossed book {bb}/{ba}")
 
     # ---- main loop -----------------------------------------------------
     def step(self):
@@ -227,6 +236,15 @@ class Simulation:
                 self._submit(a, kind, side, price, qty)
 
         traded = self._settle()
+
+        # Drop attribution entries for orders that can no longer trade. Without
+        # this, `owner` grows by every order ever submitted for the life of the
+        # run, and non-maker agents accumulate dead ids in `live` forever.
+        if len(self.owner) > 20_000:
+            alive = set(self.book.orders)
+            self.owner = {oid: v for oid, v in self.owner.items() if oid in alive}
+            for a in self.agents:
+                a.live = [oid for oid in a.live if oid in alive]
         if traded:
             self.last = traded[-1]
             self.bars.append({

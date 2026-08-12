@@ -64,6 +64,16 @@ def estimate_costs(prices: pd.DataFrame, participation: float = DEFAULT_PARTICIP
 
     Returns a Series aligned to `prices.index`, e.g. 0.0012 = 12bp.
     """
+    # participation reaches here straight from an HTTP body. A NaN would flow
+    # through sqrt() into the cost, and the fillna() at the end would then quietly
+    # replace it with the MINIMUM cost -- disabling the friction model instead of
+    # failing. Reject it rather than silently making backtests look better.
+    participation = float(participation)
+    if not np.isfinite(participation) or participation < 0:
+        raise ValueError("participation must be a finite, non-negative fraction")
+    if not np.isfinite(float(alpha)) or float(alpha) < 0:
+        raise ValueError("alpha must be finite and non-negative")
+
     close = prices["Close"]
 
     # --- half-spread proxy from the day's range ---------------------------

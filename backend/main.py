@@ -39,7 +39,9 @@ class BacktestRequest(BaseModel):
     starting_cash: float = Field(default=10_000.0, gt=0)
     regime_filter: Optional[str] = None
     realistic_fills: bool = False
-    participation: float = 0.01
+    # Bounded at the API edge: 0 disables impact, >1 would mean trading more
+    # than a whole day's volume in one order.
+    participation: float = Field(default=0.01, ge=0, le=1)
 
 
 class RegimeRequest(BaseModel):

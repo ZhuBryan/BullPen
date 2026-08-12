@@ -64,7 +64,9 @@ def build_dataset(path, horizon=20):
     X = np.asarray(rows, dtype=float)
     micro = np.asarray(micros, dtype=float)
     if len(micro) <= horizon:
-        return X[:0], np.zeros(0), micro
+        # All three must stay the same length; returning the full `micro` here
+        # would break the len(X) == len(y) == len(mid) contract callers rely on.
+        return X[:0], np.zeros(0), micro[:0]
 
     future = micro[horizon:]
     X, micro_now = X[:-horizon], micro[:-horizon]

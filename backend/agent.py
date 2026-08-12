@@ -93,7 +93,8 @@ def deflated_sharpe(sharpe: float, n_trials: int, n_obs: int,
     """
     if n_obs < 3:
         return 0.0
-    sr0 = expected_max_sharpe(n_trials, n_obs_trials or n_obs)
+    # `or` would treat a legitimate 0 as "not supplied"; be explicit.
+    sr0 = expected_max_sharpe(n_trials, n_obs if n_obs_trials is None else n_obs_trials)
     # Widen the uncertainty for skew and fat tails.
     denom = 1.0 - skew * sharpe + ((kurtosis - 1.0) / 4.0) * sharpe ** 2
     if denom <= 0:
@@ -130,7 +131,8 @@ def critique(returns, n_trials, threshold=0.95, n_obs_trials=None):
     sr_obs, skew, kurt = moments(returns)
     sr_annual = sr_obs * math.sqrt(252)
     dsr = deflated_sharpe(sr_obs, n_trials, n, skew, kurt, n_obs_trials)
-    bar = expected_max_sharpe(n_trials, n_obs_trials or n) * math.sqrt(252)
+    bar = expected_max_sharpe(
+        n_trials, n if n_obs_trials is None else n_obs_trials) * math.sqrt(252)
     passed = dsr >= threshold and sr_annual > bar
 
     # Plausibility ceiling. A near-deterministic return series (a rounded

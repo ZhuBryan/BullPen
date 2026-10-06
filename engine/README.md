@@ -61,6 +61,37 @@ Correctness is established separately and first: `diff_test.py` feeds both engin
 
 **How the Python speedup happened**, because the process matters more than the number. The first attempt replaced `max()`/`min()` scans over the price dictionaries with a bisect-maintained sorted index. That improved the median by 24% and barely moved the tail, which meant the hypothesis was wrong. Profiling per operation type showed why: cancels had an 82us median against 2.4us for limits, 34x worse, because removing an order from the middle of its queue is a linear scan and `deque` makes random access worse. GC was ruled out by rerunning with collection disabled. Replacing eager removal with lazy cancellation, where a cancel flags the order and decrements a per-level live counter, produced the numbers above.
 
+## Concurrency
+
+A real engine runs the feed handler and the matcher on separate threads, and the handoff is where the engineering lives. `rust/src/spsc.rs` is a lock-free single-producer single-consumer ring buffer:
+
+- `head` is producer-owned, `tail` consumer-owned, so each side loads its own index `Relaxed` and the other's `Acquire`. The split is enforced by the type system: `channel()` returns two separate handles, so a second producer is not constructible.
+- The producer writes the slot, then publishes `head` with `Release`; the consumer reads `head` with `Acquire`. That pairing is what guarantees the slot write is visible before the index advertising it. With `Relaxed` the consumer can legally read uninitialized memory, and it will still pass every test on x86 before failing on ARM.
+- `head` and `tail` are padded onto separate 64-byte cache lines. Without that, two threads touching no shared data still ping-pong a cache line between cores.
+- Indices increase monotonically and are masked to a slot, which removes the full-versus-empty ambiguity without sacrificing a slot.
+
+Backpressure returns the value to the caller instead of blocking or dropping it: a feed that silently discards messages is worse than one that reports being behind.
+
+```bash
+cargo run --release -- pipeline ../ops.txt
+```
+
+That mode runs the same op stream through the queue and through a `Mutex<VecDeque>` baseline, asserts both produced identical event counts, and prints the ratio. Comparing against a mutex on identical work is the honest way to show whether lock-free earns its complexity.
+
+## Pre-trade risk
+
+`risk.py` is the gate in front of the engine, which is where venues put it: risk rules change per account and often, matching logic must not. Five checks, all with recorded reject codes for audit:
+
+| check | catches |
+|---|---|
+| max order size / value | the fat-finger order |
+| price collar (bps from last trade) | orders far from the market that will be picked off |
+| position limit | net exposure, enforced on fills rather than submissions |
+| open order limit | a runaway algo flooding the book |
+| self-trade prevention | an account matching its own resting order |
+
+A test asserts the gate never changes *how* orders match, only whether they are admitted.
+
 ## Design decisions
 
 **Integer tick prices, never floats.** `0.1 + 0.2 != 0.3`. Float money bugs are silent and unrecoverable. Conversion happens only at the edges.
@@ -90,7 +121,8 @@ Event payloads:
 
 Being explicit, since a half-built project described honestly is worth more than a finished one described loosely:
 
-- **Rust engine is built and verified** (see above); what remains is multi-symbol support and a live-capture run against real Binance traffic.
+- **No C++.** Rust covers the systems ground, but most quant job specs ask for C++. The differential harness would validate a third port for free.
+- **The matching engine itself is still single-threaded.** The lock-free queue and the two-thread pipeline exist and are tested, but the deterministic single-threaded path is what the differential test runs against, and that is deliberate: the oracle has to stay reproducible.
 - **Gradient-boosted trees.** Only logistic regression is implemented, deliberately, as a baseline. Trees need sklearn or lightgbm.
 - **Parquet storage.** Capture writes gzipped JSONL. Columnar storage earns its place at analysis scale, not at capture time.
 - **Multi-symbol support.** One book, one symbol.
@@ -109,9 +141,11 @@ orderbook.py   matching engine, price-time priority, lazy cancels
 capture.py     Binance L2 capture, snapshot/diff resequencing, gap detection
 replay.py      book reconstruction, queue-position fills, microstructure features
 research.py    labels, purged walk-forward CV, baseline model, cost-aware metrics
+risk.py        pre-trade checks: size, value, price collar, position, self-trade
 bench.py       throughput and tail latency harness
 diff_test.py   proves the Rust engine matches this one, event for event
 test.py        runs every self-check
 test_capture_live.py  live capture against a local fake Binance feed
 rust/          the compiled port: same semantics, 12.7x throughput
+rust/src/spsc.rs  lock-free SPSC queue for the feed -> matcher handoff
 ```

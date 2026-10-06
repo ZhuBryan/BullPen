@@ -5,7 +5,7 @@ import importlib
 import sys
 import traceback
 
-MODULES = ["orderbook", "capture", "replay", "research"]
+MODULES = ["orderbook", "capture", "replay", "research", "risk"]
 
 failed = []
 for name in MODULES:

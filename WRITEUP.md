@@ -170,13 +170,28 @@ The order book was not the only place I was confidently wrong. Three more, all f
 
 The pattern in all four is the same. Each one was a confident claim in a comment or docstring that the code did not honor, and each was found by a check that compared the claim against measured behavior rather than against my intent.
 
+## The handoff between threads
+
+A single-threaded engine is a toy in one specific way: real venues parse the socket on one thread and match on another, and the queue between them is where the interesting failure modes live. A `Mutex<VecDeque>` works and is two lines, but it puts a kernel-visible lock on the hot path, and the producer can block the consumer for far longer than the work itself takes.
+
+So the queue is a lock-free SPSC ring buffer. Three things make it correct, and each is something I have since been asked about:
+
+**Ownership.** `head` (next write slot) is written only by the producer, `tail` only by the consumer. Each side loads its own index with `Relaxed`, because nobody else writes it, and the other side's with `Acquire`. The single-producer constraint is enforced by the type system rather than by a comment: `channel()` returns two separate owned handles, so a second producer is not constructible.
+
+**Memory ordering.** The producer writes the slot, then publishes the new index with `Release`. The consumer reads the index with `Acquire`. That pairing is the entire correctness argument: it guarantees the slot write is visible to anyone who observes the index advertising it. Use `Relaxed` instead and the consumer may legally read uninitialized memory. The reason this bug is dangerous is that it will pass every test you write on x86, because x86 is strongly ordered enough to hide it, and then fail on ARM.
+
+**False sharing.** `head` and `tail` sit on separate 64-byte cache lines. Without the padding they share one, so every producer write invalidates the consumer's cached copy of the line it is reading. Two threads touching no common data would still ping-pong a cache line between cores: logically correct, needlessly slow.
+
+Backpressure returns the value to the caller rather than blocking or dropping it. A market-data feed that silently discards messages is worse than one that tells you it is behind.
+
+The pipeline mode runs the same op file through the lock-free queue and through a mutex baseline, asserts both fed the matcher identical event counts, and prints the ratio. Benchmarking a lock-free structure against nothing proves it runs; benchmarking it against the obvious alternative on identical work shows whether the complexity earned anything.
+
 ## Honest limitations
 
 The things this does not do, since a half-built project described accurately is worth more than a finished one described loosely:
 
-- **Single-threaded.** A real engine runs a feed handler and a matcher on separate threads with a lock-free queue between them. There is no concurrency here at all, and the handoff is where much of the real engineering lives.
-- **No C++.** Rust covers the systems ground, but C++ is what most of these job specs ask for.
-- **No pre-trade risk layer.** No max order size, price collars, position limits, or self-trade prevention.
+- **No C++.** Rust covers the systems ground, but C++ is what most of these job specs ask for, and the differential harness would validate a third port for free.
+- **The matching engine is still single-threaded.** There is now a lock-free SPSC queue and a two-thread pipeline mode measured against a mutex baseline, but the deterministic single-threaded path remains what the differential test runs against, on purpose: an oracle has to be reproducible.
 - **One symbol.** One book, no instrument registry.
 - **Live capture tested against a fake feed, not the real exchange.** A local websocket server speaking Binance's wire format, with a scripted sequence gap. It found a real bug on the first run: a closed socket raised an unhandled exception and killed the recorder, despite the module claiming to handle disconnects. What it does not cover is the real feed's rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
 - **The tail is still allocator-bound.** Both engines show a multi-millisecond worst case, which is the event log growing, not the matching logic. That is why p99.9 is the quoted figure and why the max is shown rather than hidden.
@@ -189,4 +204,6 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 ## What I would do next
 
-The lock-free queue between a feed thread and the matching thread. It is the gap that costs the most, it is where the memory-ordering and false-sharing problems I have not yet had to solve actually live, and the existing differential harness would validate it for free.
+A C++ port. The semantics are now pinned by a differential test and the data-structure decisions are already made and documented, so a third implementation costs mostly syntax and gets validated for free by a harness that already exists. That is also the cheapest honest way to learn the language most of these job specs actually ask for.
+
+After that, multi-symbol: an instrument registry, per-symbol books, and a feed handler that demultiplexes. It is less interesting than it sounds, which is exactly why it has not happened yet.

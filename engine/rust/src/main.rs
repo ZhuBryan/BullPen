@@ -67,20 +67,7 @@ fn run_stream(ops: &[Op]) -> Book {
     let mut book = Book::new();
     let mut live: Vec<u64> = Vec::new();
     for op in ops {
-        match *op {
-            Op::Limit(side, price, qty) => live.push(book.limit(side, price, qty)),
-            Op::Market(side, qty) => {
-                book.market(side, qty);
-            }
-            Op::Cancel => {
-                if let Some(id) = live.pop() {
-                    book.cancel(id);
-                }
-            }
-            Op::CancelId(id) => {
-                book.cancel(id);
-            }
-        }
+        apply(&mut book, &mut live, *op);
     }
     book
 }
@@ -226,6 +213,132 @@ fn replay(path: &str) {
     print!("{}", out);
 }
 
+/// Two threads: a feed handler pushing orders, a matcher draining them.
+///
+/// This is the architecture a real engine uses, and the reason to measure it is
+/// that the handoff is not free. Comparing the lock-free queue against a
+/// `Mutex<VecDeque>` on identical work is the honest way to show whether the
+/// lock-free version earns its complexity, rather than asserting that it does.
+fn pipeline(ops_path: &str) {
+    use bullpen_engine::spsc;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    let ops = load_ops(ops_path);
+    let n = ops.len();
+    println!("pipeline: {} ops, feed thread -> matching thread\n", n);
+
+    // ---- lock-free SPSC ------------------------------------------------
+    let (mut tx, mut rx) = spsc::channel::<Op>(8192);
+    let feed_ops = ops.clone();
+    let t0 = Instant::now();
+    let feeder = thread::spawn(move || {
+        let mut full_hits = 0u64;
+        for op in feed_ops {
+            let mut v = op;
+            loop {
+                match tx.push(v) {
+                    Ok(()) => break,
+                    Err(back) => {
+                        // Backpressure: the matcher is behind. Count it instead
+                        // of dropping the message.
+                        v = back;
+                        full_hits += 1;
+                        std::hint::spin_loop();
+                    }
+                }
+            }
+        }
+        full_hits
+    });
+
+    let mut book = Book::new();
+    let mut live: Vec<u64> = Vec::new();
+    let mut done = 0usize;
+    while done < n {
+        match rx.pop() {
+            Some(op) => {
+                apply(&mut book, &mut live, op);
+                done += 1;
+            }
+            None => std::hint::spin_loop(),
+        }
+    }
+    let lockfree = t0.elapsed();
+    let full_hits = feeder.join().unwrap();
+
+    println!("lock-free SPSC   {:>10.4}s  {:>12.0} ops/sec  (backpressure hits: {})",
+             lockfree.as_secs_f64(), n as f64 / lockfree.as_secs_f64(), full_hits);
+    println!("                 {} events", book.events.len());
+
+    // ---- mutex baseline, same work -------------------------------------
+    let q: Arc<Mutex<VecDeque<Op>>> = Arc::new(Mutex::new(VecDeque::with_capacity(8192)));
+    let feed_ops = ops.clone();
+    let qp = Arc::clone(&q);
+    let t1 = Instant::now();
+    let feeder = thread::spawn(move || {
+        for op in feed_ops {
+            loop {
+                let mut guard = qp.lock().unwrap();
+                if guard.len() < 8192 {
+                    guard.push_back(op);
+                    break;
+                }
+                drop(guard);
+                std::hint::spin_loop();
+            }
+        }
+    });
+
+    let mut book2 = Book::new();
+    let mut live2: Vec<u64> = Vec::new();
+    let mut done = 0usize;
+    while done < n {
+        let next = q.lock().unwrap().pop_front();
+        match next {
+            Some(op) => {
+                apply(&mut book2, &mut live2, op);
+                done += 1;
+            }
+            None => std::hint::spin_loop(),
+        }
+    }
+    let mutexed = t1.elapsed();
+    feeder.join().unwrap();
+
+    println!("Mutex<VecDeque>  {:>10.4}s  {:>12.0} ops/sec",
+             mutexed.as_secs_f64(), n as f64 / mutexed.as_secs_f64());
+    println!("                 {} events", book2.events.len());
+
+    assert_eq!(
+        book.events.len(),
+        book2.events.len(),
+        "the two queues must feed the matcher identical work"
+    );
+    println!("\nspeedup {:.2}x  (both produced identical event counts)",
+             mutexed.as_secs_f64() / lockfree.as_secs_f64());
+    println!("note: single run, one machine. The queue is not the bottleneck at");
+    println!("      these rates, so treat this as a floor on the difference.");
+}
+
+/// One op against the book. Shared so every mode applies ops identically.
+fn apply(book: &mut Book, live: &mut Vec<u64>, op: Op) {
+    match op {
+        Op::Limit(side, price, qty) => live.push(book.limit(side, price, qty)),
+        Op::Market(side, qty) => {
+            book.market(side, qty);
+        }
+        Op::Cancel => {
+            if let Some(id) = live.pop() {
+                book.cancel(id);
+            }
+        }
+        Op::CancelId(id) => {
+            book.cancel(id);
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("bench");
@@ -245,6 +358,13 @@ fn main() {
             let path = args.get(2).expect("usage: replay <ops file>");
             replay(path);
         }
-        other => eprintln!("unknown mode {} (expected bench | replay)", other),
+        "pipeline" => {
+            let path = args.get(2).expect("usage: pipeline <ops file>");
+            pipeline(path);
+        }
+        other => eprintln!(
+            "unknown mode {} (expected bench | replay | pipeline)",
+            other
+        ),
     }
 }

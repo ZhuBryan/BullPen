@@ -60,16 +60,46 @@ MAX_PLAUSIBLE_SHARPE = 10.0
 # ---------------------------------------------------------------------------
 # The critic
 # ---------------------------------------------------------------------------
-def expected_max_sharpe(n_trials: int, n_obs: int) -> float:
+def expected_max_sharpe(n_trials: int, n_obs: int,
+                        trial_sharpes=None) -> float:
     """Best Sharpe you would expect from `n_trials` strategies with NO edge.
 
     This is the bar a candidate has to clear. It rises with the number of
     trials, which is the entire point: searching harder raises the bar.
+
+        SR0 = sqrt(Var[{SR_n}]) * [ (1-g)*Z(1 - 1/N) + g*Z(1 - 1/(N*e)) ]
+
+    `trial_sharpes` is the set of per-observation Sharpes the search actually
+    produced, and passing it is the faithful Bailey/Lopez de Prado estimator:
+    the scale of the bar is the OBSERVED dispersion across trials.
+
+    Without it we fall back to the null-hypothesis approximation
+    sqrt(Var) ~ 1/sqrt(T-1), which silently assumes the trials were
+    independent. They usually are not: a search that hill-climbs around its
+    incumbent produces tightly clustered Sharpes, and the real dispersion is
+    the thing that tells you how much of the best result was luck. Prefer the
+    measured version whenever the trial Sharpes are available.
     """
     n_trials = max(int(n_trials), 1)
-    if n_trials == 1 or n_obs < 2:
+    if n_trials == 1:
         return 0.0
-    sigma = 1.0 / math.sqrt(max(n_obs - 1, 1))     # std error of a Sharpe estimate
+
+    if trial_sharpes is not None and len(trial_sharpes) >= 2:
+        m = sum(trial_sharpes) / len(trial_sharpes)
+        var = sum((s - m) ** 2 for s in trial_sharpes) / (len(trial_sharpes) - 1)
+        sigma = math.sqrt(var)
+        # Identical trials carry no dispersion, so there is no selection effect
+        # to correct for. Relative tolerance because summing n copies of a float
+        # does not divide back to that float exactly.
+        if sigma <= 1e-12 * max(1.0, abs(m)):
+            return 0.0
+    else:
+        if n_obs < 2:
+            return 0.0
+        sigma = 1.0 / math.sqrt(max(n_obs - 1, 1))   # fallback approximation
+
+    if sigma <= 0:
+        return 0.0
     a = _N.inv_cdf(1 - 1.0 / n_trials)
     b = _N.inv_cdf(1 - 1.0 / (n_trials * math.e))
     return sigma * ((1 - EULER) * a + EULER * b)
@@ -77,24 +107,28 @@ def expected_max_sharpe(n_trials: int, n_obs: int) -> float:
 
 def deflated_sharpe(sharpe: float, n_trials: int, n_obs: int,
                     skew: float = 0.0, kurtosis: float = 3.0,
-                    n_obs_trials: int | None = None) -> float:
+                    n_obs_trials: int | None = None,
+                    trial_sharpes=None) -> float:
     """Probability the true Sharpe beats the selection-adjusted benchmark SR0.
 
     Note it is P(true SR > SR0), NOT P(true SR > 0): the bar already includes
     what luck would produce over `n_trials` attempts.
 
-    n_obs        length of the sample being scored.
-    n_obs_trials length of the sample the SEARCH ran on. The trial Sharpes whose
-                 maximum SR0 describes were estimated over that window, so the
-                 standard error in SR0 must use it. Defaults to n_obs, which is
-                 only correct when you searched and scored on the same data.
+    n_obs         length of the sample being scored.
+    n_obs_trials  length of the sample the SEARCH ran on. Only used by the
+                  fallback approximation, which needs a sample length to stand
+                  in for the trial dispersion. Ignored when trial_sharpes is
+                  supplied, because then the dispersion is measured directly.
+    trial_sharpes per-observation Sharpes the search produced (see
+                  expected_max_sharpe). Supply these when you have them.
 
     Returns a value in [0, 1]. Above ~0.95 is the usual bar for "believable".
     """
     if n_obs < 3:
         return 0.0
     # `or` would treat a legitimate 0 as "not supplied"; be explicit.
-    sr0 = expected_max_sharpe(n_trials, n_obs if n_obs_trials is None else n_obs_trials)
+    sr0 = expected_max_sharpe(
+        n_trials, n_obs if n_obs_trials is None else n_obs_trials, trial_sharpes)
     # Widen the uncertainty for skew and fat tails.
     denom = 1.0 - skew * sharpe + ((kurtosis - 1.0) / 4.0) * sharpe ** 2
     if denom <= 0:
@@ -122,17 +156,30 @@ def moments(returns):
     return mean / sd, skew, kurt
 
 
-def critique(returns, n_trials, threshold=0.95, n_obs_trials=None):
+def critique(returns, n_trials, threshold=0.95, n_obs_trials=None,
+             trial_sharpes=None):
     """The verdict, in numbers and in plain English.
 
-    n_obs_trials: length of the window the search ran on (see deflated_sharpe).
+    n_obs_trials:  length of the window the search ran on (see deflated_sharpe).
+    trial_sharpes: ANNUALIZED Sharpes the search produced. Converted to
+                   per-observation here so the dispersion is in the same units
+                   as the test statistic.
     """
     n = len(returns)
     sr_obs, skew, kurt = moments(returns)
     sr_annual = sr_obs * math.sqrt(252)
-    dsr = deflated_sharpe(sr_obs, n_trials, n, skew, kurt, n_obs_trials)
+
+    # Everything inside the DSR math is per-observation. Mixing annualized
+    # dispersion with a per-observation Sharpe would inflate the bar by ~16x.
+    obs_trials = ([s / math.sqrt(252) for s in trial_sharpes]
+                  if trial_sharpes else None)
+    estimator = "observed trial dispersion" if (
+        obs_trials and len(obs_trials) >= 2) else "null approximation"
+
+    dsr = deflated_sharpe(sr_obs, n_trials, n, skew, kurt, n_obs_trials, obs_trials)
     bar = expected_max_sharpe(
-        n_trials, n if n_obs_trials is None else n_obs_trials) * math.sqrt(252)
+        n_trials, n if n_obs_trials is None else n_obs_trials,
+        obs_trials) * math.sqrt(252)
     passed = dsr >= threshold and sr_annual > bar
 
     # Plausibility ceiling. A near-deterministic return series (a rounded
@@ -164,6 +211,7 @@ def critique(returns, n_trials, threshold=0.95, n_obs_trials=None):
     return {"sharpe": round(sr_annual, 3), "deflated_sharpe": round(dsr, 4),
             "luck_benchmark": round(bar, 3), "n_trials": n_trials,
             "n_obs": n, "skew": round(skew, 3), "kurtosis": round(kurt, 3),
+            "estimator": estimator,   # which SR0 scale was used, so it is auditable
             "passed": bool(passed), "reason": reason}
 
 
@@ -186,7 +234,9 @@ class ResearchAgent:
         self.realistic_fills = realistic_fills
         cut = int(len(prices) * train_frac)
         self.train, self.test = prices.iloc[:cut], prices.iloc[cut:]
-        self.trials = 0
+        self.trials = 0      # configurations that produced a Sharpe (the N in SR0)
+        self.proposals = 0   # everything attempted, including failures
+        self.failed = 0
         self.history = []
         self.best = None            # best by TRAIN score; test stays untouched
         self.candidates = [s for s in STRATEGIES if STRATEGIES[s]["params"]]
@@ -233,9 +283,14 @@ class ResearchAgent:
         for _ in range(self.budget):
             sid, params = self.propose()
             res = self.backtest(sid, params, self.train)
-            self.trials += 1                  # every look counts, even a bad one
+            self.proposals += 1
             if res is None:
+                # A configuration that failed to run produced no Sharpe, so it
+                # is not one of the N trials the maximum is taken over. Counted
+                # separately rather than inflating N.
+                self.failed += 1
                 continue
+            self.trials += 1
             score = res["metrics"]["sharpe"]
             row = {"strategy": sid, "params": params, "train_sharpe": score}
             self.history.append(row)
@@ -254,15 +309,19 @@ class ResearchAgent:
             return {"found": False, "reason": "best strategy failed out of sample",
                     "trials": self.trials}
 
-        # The search ran on the training window, so the luck benchmark is sized
-        # on that length, not on the shorter held-out window being scored.
+        # Hand the critic the ACTUAL Sharpes the search produced, so SR0 is
+        # scaled by measured dispersion rather than an independence assumption
+        # this search violates (it hill-climbs around its incumbent).
         verdict = critique(_returns_from_equity(oos["equity"]), self.trials,
-                           n_obs_trials=len(self.train))
+                           n_obs_trials=len(self.train),
+                           trial_sharpes=[h["train_sharpe"] for h in self.history])
         return {
             "found": True,
             "strategy": self.best["strategy"],
             "params": self.best["params"],
             "trials": self.trials,
+            "proposals": self.proposals,
+            "failed_trials": self.failed,
             "train_sharpe": round(self.best["train_sharpe"], 3),
             "out_of_sample": {
                 "return_pct": oos["metrics"]["total_return_pct"],
@@ -297,6 +356,34 @@ def demo():
     assert deflated_sharpe(0.15, 1, 1000) > 0.95
     # the same number after a big search is not
     assert deflated_sharpe(0.15, 5000, 1000) < 0.95
+
+    # ---- the faithful estimator: bar scales with MEASURED dispersion ----
+    tight = [0.10, 0.11, 0.09, 0.10, 0.11, 0.10]   # a search that barely varied
+    wide = [0.02, 0.19, 0.05, 0.16, 0.01, 0.20]    # same mean, much wider spread
+    bar_tight = expected_max_sharpe(100, 500, tight)
+    bar_wide = expected_max_sharpe(100, 500, wide)
+    assert bar_wide > 3 * bar_tight, (
+        f"bar must track trial dispersion: tight {bar_tight:.4f} wide {bar_wide:.4f}")
+
+    # still rises with trial count at fixed dispersion
+    assert expected_max_sharpe(1000, 500, wide) > expected_max_sharpe(10, 500, wide)
+    # a single trial needs no correction whatever is passed
+    assert expected_max_sharpe(1, 500, wide) == 0.0
+    # identical trials means no selection effect to correct for
+    assert expected_max_sharpe(100, 500, [0.1] * 8) == 0.0
+    # fewer than two observations falls back to the approximation
+    assert expected_max_sharpe(100, 500, [0.1]) == expected_max_sharpe(100, 500)
+    assert expected_max_sharpe(100, 500, None) == expected_max_sharpe(100, 500)
+
+    # critique must convert annualized trial Sharpes to per-observation units;
+    # forgetting that would inflate the bar by about sqrt(252)
+    rets = _draw(random.Random(9), 600, 0.0011, 0.01)
+    v_obs = critique(rets, n_trials=6, trial_sharpes=[1.6, 1.2, 0.4, 1.9, 0.8, 1.5])
+    v_app = critique(rets, n_trials=6)
+    assert v_obs["estimator"] == "observed trial dispersion"
+    assert v_app["estimator"] == "null approximation"
+    assert v_obs["luck_benchmark"] < 10, \
+        f"unit error: bar {v_obs['luck_benchmark']} looks like annualized dispersion"
 
     # fat tails must reduce confidence
     thin = deflated_sharpe(0.1, 10, 500, skew=0.0, kurtosis=3.0)

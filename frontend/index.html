@@ -2582,7 +2582,9 @@ async function runAgent() {
       (c.passed ? 'Survives scrutiny' : 'Not supported') + '</b><br>' +
       escHtml(c.reason) +
       '<br><span style="color:var(--muted)">Parameters: ' +
-      escHtml(JSON.stringify(d.params)) + '</span>';
+      escHtml(JSON.stringify(d.params)) +
+      ' · ' + d.trials + ' of ' + d.proposals + ' proposals scored' +
+      ' · SR0 from ' + escHtml(c.estimator || 'null approximation') + '</span>';
   } catch (e) {
     err.textContent = e.message; err.style.display = 'block';
   } finally {

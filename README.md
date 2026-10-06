@@ -1,10 +1,27 @@
-# Bullpen: Trading Arena & Backtester
+# Bullpen: Exchange Engine & Quantitative Research Platform
 
-Bullpen is a free paper-trading arena where rule-based trading bots compete on real market data, paired with a full strategy backtester. You can write your own trading rules in plain text. No coding required, no API keys, and no costs.
+Two halves. A limit order book exchange built from scratch, and a research platform that uses it.
 
-Everything runs on free Yahoo Finance data through `yfinance`. If you're offline, the app falls back to realistic synthetic prices so it keeps working.
+**The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to Rust. The two are differential-tested: fed identical order streams, they produce byte-identical event logs, and the Rust version runs **12.7x faster (3.4M orders/sec) with 13x lower p99.9 latency**. On top of it sit live Binance L2 capture with sequence-gap detection, a replay harness that models queue position instead of assuming fills at mid, and a research pipeline with purged walk-forward validation.
+
+**The platform** is a paper-trading arena and backtester: write trading rules in plain English or a small safe DSL, race strategies against each other, and stress-test them with a parameter optimizer, walk-forward validation, Monte Carlo, and a market-regime detector.
+
+No paid APIs, no API keys. Free Yahoo Finance data with a synthetic offline fallback.
+
+There is a [technical writeup](WRITEUP.md) covering the optimization work and, more usefully, the parts I got wrong.
 
 ## Quick start
+
+The engine and its tests (standard library plus numpy):
+
+```bash
+cd engine
+python test.py          # every self-check
+python bench.py         # throughput and tail latency
+cd rust && cargo test   # the Rust port
+```
+
+The web platform:
 
 ```bash
 pip install -r requirements.txt

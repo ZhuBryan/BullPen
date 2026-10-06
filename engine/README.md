@@ -14,7 +14,7 @@ The Python side is standard library plus numpy; the Rust port is standard librar
 ## Quick start
 
 ```bash
-python test.py                    # run every self-check
+python test.py                    # run every self-check (incl. live capture)
 python bench.py                   # benchmark the engine
 python bench.py --quick           # faster pass
 
@@ -94,7 +94,7 @@ Being explicit, since a half-built project described honestly is worth more than
 - **Gradient-boosted trees.** Only logistic regression is implemented, deliberately, as a baseline. Trees need sklearn or lightgbm.
 - **Parquet storage.** Capture writes gzipped JSONL. Columnar storage earns its place at analysis scale, not at capture time.
 - **Multi-symbol support.** One book, one symbol.
-- **A live-capture run against real Binance traffic.** The sequencing state machine is covered by tests; the socket path itself has only been exercised against synthetic data.
+- **A capture run against *real* Binance traffic.** The live socket path is now tested end to end, but against a local fake feed (`test_capture_live.py`), not the real exchange. That test stands up an actual websocket server and HTTP snapshot endpoint on localhost, scripts a deliberate sequence gap, and asserts the gap is caught, a resync snapshot follows, the trade stream is routed, a dropped socket is survived, and the gzip file round-trips. It found a real bug on first run: a closed socket raised an unhandled `ConnectionClosedOK` and killed the recorder, so `record()` now reconnects with exponential backoff and re-snapshots on every reconnect (mandatory, since the book moved while the socket was down). What remains untested is the real feed's quirks: rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
 
 ## An honest note on results
 
@@ -112,5 +112,6 @@ research.py    labels, purged walk-forward CV, baseline model, cost-aware metric
 bench.py       throughput and tail latency harness
 diff_test.py   proves the Rust engine matches this one, event for event
 test.py        runs every self-check
+test_capture_live.py  live capture against a local fake Binance feed
 rust/          the compiled port: same semantics, 12.7x throughput
 ```

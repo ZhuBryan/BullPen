@@ -1006,8 +1006,18 @@ function escHtml(s) {
 // Chart.js ships its own font stack, which would render axis labels and
 // tooltips in a different typeface from the rest of the app. Point it at the
 // design system's fonts once, globally.
-Chart.defaults.font.family = "'Manrope', system-ui, sans-serif";
-Chart.defaults.font.size = 11;
+//
+// Guarded because this runs at parse time: Chart.js comes from a CDN, and an
+// unguarded `Chart.defaults...` here would throw before anything else in this
+// script runs, leaving the whole page dead (no tabs, no forms) instead of just
+// missing its charts.
+const HAS_CHARTS = typeof Chart !== 'undefined';
+if (HAS_CHARTS) {
+  Chart.defaults.font.family = "'Manrope', system-ui, sans-serif";
+  Chart.defaults.font.size = 11;
+} else {
+  console.warn('Chart.js failed to load — charts disabled, rest of the app still works.');
+}
 
 // Chart defaults — every new Chart() call merges or spreads these.
 const CHART_DEFAULTS = {
@@ -1124,7 +1134,7 @@ const bullpenCandles = {
     ctx.restore();
   }
 };
-Chart.register(bullpenCandles);
+if (HAS_CHARTS) Chart.register(bullpenCandles);   // same CDN guard as above
 
 // Create (or recreate) a price chart on `canvasId`.
 //   candles: [{o,h,l,c}]   labels: [dateStr]   markers: [{i, type}]

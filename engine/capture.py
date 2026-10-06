@@ -26,12 +26,20 @@ Run `python capture.py` for the self-check (no network).
 Run `python capture.py --live BTCUSDT` to record (needs `pip install websockets`).
 """
 
+import asyncio
 import gzip
 import json
 import time
 from pathlib import Path
 
 APPLIED, BUFFERED, STALE, GAP = "applied", "buffered", "stale", "gap"
+
+# Module-level so a test can point record() at a local fake feed. The live
+# socket path is the part a unit test cannot reach, and it is where the real
+# failures live, so it needs to be testable without touching the network.
+WS_URL = ("wss://stream.binance.com:9443/stream?streams="
+          "{low}@depth@100ms/{low}@trade")
+SNAPSHOT_URL = "https://api.binance.com/api/v3/depth?symbol={sym}&limit=1000"
 
 
 class DepthStream:
@@ -143,40 +151,65 @@ async def record(symbol="BTCUSDT", seconds=60, outdir="data"):
     # depth alone cannot tell you whether a level shrank because someone traded
     # (consumes the front of the queue) or someone cancelled (does not). Without
     # that distinction, queue-position fill modelling is guesswork.
-    url = (f"wss://stream.binance.com:9443/stream?streams="
-           f"{low}@depth@100ms/{low}@trade")
-    snap_url = f"https://api.binance.com/api/v3/depth?symbol={sym}&limit=1000"
+    url = WS_URL.format(low=low)
+    snap_url = SNAPSHOT_URL.format(sym=sym)
     out = f"{outdir}/{sym}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl.gz"
 
     stream, writer = DepthStream(), Writer(out)
     deadline = time.time() + seconds
     print(f"recording {sym} -> {out}")
 
-    async with websockets.connect(url) as ws:
-        # Snapshot AFTER the socket is open, so no events are missed in between.
+    def resnapshot(reason):
         snap = json.loads(urllib.request.urlopen(snap_url, timeout=10).read())
         stream.apply_snapshot(snap)
-        writer.write({"type": "snapshot", "ts": time.time(), **snap})
+        writer.write({"type": "snapshot", "ts": time.time(), "reason": reason, **snap})
 
-        while time.time() < deadline:
-            msg = json.loads(await ws.recv())
-            data = msg.get("data", msg)
+    # Outer loop reconnects. Binance recycles connections (every 24h, and
+    # whenever the network hiccups), so a dropped socket is a NORMAL event, not
+    # an error: without this the capture service dies with an unhandled
+    # ConnectionClosed and the recording simply stops.
+    #
+    # Every reconnect re-snapshots. That is mandatory, not belt-and-braces: while
+    # the socket was down the book kept moving, so the local copy is stale and
+    # the next diff will not line up with it.
+    attempt = 0
+    while time.time() < deadline:
+        try:
+            async with websockets.connect(url) as ws:
+                attempt = 0
+                # Snapshot AFTER the socket is open, so nothing is missed between.
+                resnapshot("initial" if not stream.synced else "reconnect")
 
-            if data.get("e") == "trade":
-                writer.write({"type": "trade", "ts": time.time(),
-                              "p": data["p"], "q": data["q"],
-                              "m": data["m"],  # True = buyer is the maker (sell aggressor)
-                              "T": data["T"]})
-                continue
+                while time.time() < deadline:
+                    msg = json.loads(await ws.recv())
+                    data = msg.get("data", msg)
 
-            status = stream.apply_event(data)
-            writer.write({"type": "diff", "ts": time.time(), "status": status, **data})
-            if status == GAP:
-                # Resync rather than keep a book we know is wrong.
-                print("gap detected — resyncing")
-                snap = json.loads(urllib.request.urlopen(snap_url, timeout=10).read())
-                stream.apply_snapshot(snap)
-                writer.write({"type": "snapshot", "ts": time.time(), **snap})
+                    if data.get("e") == "trade":
+                        writer.write({"type": "trade", "ts": time.time(),
+                                      "p": data["p"], "q": data["q"],
+                                      # True = buyer is the maker (sell aggressor)
+                                      "m": data["m"], "T": data["T"]})
+                        continue
+
+                    status = stream.apply_event(data)
+                    writer.write({"type": "diff", "ts": time.time(),
+                                  "status": status, **data})
+                    if status == GAP:
+                        # Resync rather than keep a book we know is wrong.
+                        print("gap detected — resyncing")
+                        resnapshot("gap")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:          # noqa: BLE001 - dropped socket, DNS, 5xx
+            if time.time() >= deadline:
+                break
+            attempt += 1
+            backoff = min(2 ** attempt, 30)
+            print(f"connection lost ({type(exc).__name__}) — "
+                  f"reconnecting in {backoff}s")
+            writer.write({"type": "disconnect", "ts": time.time(),
+                          "error": type(exc).__name__})
+            await asyncio.sleep(min(backoff, max(0.0, deadline - time.time())))
 
     writer.close()
     print(f"{writer.count} messages, {stream.gaps} gaps, "

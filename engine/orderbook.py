@@ -31,11 +31,33 @@ Two data-structure decisions, both made because the profiler said so
 Run `python orderbook.py` to execute the self-check.
 """
 
+import time
 from bisect import bisect_left, insort
 from collections import deque
 from dataclasses import dataclass
 
 BUY, SELL = "B", "S"
+
+
+def monotonic_ns():
+    """Default clock. Monotonic so it cannot run backwards mid-session."""
+    return time.perf_counter_ns()
+
+
+def counter_clock():
+    """Deterministic stand-in clock, for tests and cross-engine comparison.
+
+    Wall-clock timestamps are process-local by definition: two engines replaying
+    the same stream will never produce the same ones. Injecting a counter makes
+    a log reproducible when that is what matters.
+    """
+    n = [0]
+
+    def tick():
+        n[0] += 1
+        return n[0]
+
+    return tick
 
 
 @dataclass
@@ -49,7 +71,14 @@ class Order:
 
 
 class Book:
-    def __init__(self):
+    def __init__(self, clock=None):
+        # Every event carries a monotonic sequence number and a timestamp, the
+        # way a real venue's feed does (ITCH stamps every message). `seq` is the
+        # authoritative ordering: it is deterministic and survives replay, while
+        # a wall clock does not. `clock` is injectable so a test or a
+        # cross-engine comparison can make the log reproducible.
+        self._clock = clock or monotonic_ns
+        self._seq = 0
         self.bids: dict[int, deque[Order]] = {}  # price -> FIFO queue
         self.asks: dict[int, deque[Order]] = {}
         self.orders: dict[int, Order] = {}       # id -> order, O(1) cancel lookup
@@ -99,7 +128,8 @@ class Book:
     def cancel(self, order_id):
         o = self.orders.pop(order_id, None)
         if o is None:
-            self.events.append(("reject_cancel", order_id))
+            self._seq += 1
+            self.events.append(("reject_cancel", order_id, self._seq, self._clock()))
             return False
         o.cancelled = True
         _, _, live = self._levels(o.side)
@@ -107,7 +137,8 @@ class Book:
             live[o.price] -= 1
             if live[o.price] <= 0:
                 self._del_level(o.side, o.price)
-        self.events.append(("canceled", order_id, o.remaining))
+        self._seq += 1
+        self.events.append(("canceled", order_id, o.remaining, self._seq, self._clock()))
         return True
 
     # ---- engine --------------------------------------------------------
@@ -125,11 +156,13 @@ class Book:
         price = int(price) if price is not None else None
         o = Order(self._next_id, side, price, int(qty), int(qty))
         self._next_id += 1
-        self.events.append(("accepted", o.id, side, price, qty))
+        self._seq += 1
+        self.events.append(("accepted", o.id, side, price, qty, self._seq, self._clock()))
         self._match(o)
         if o.remaining:
             if price is None:
-                self.events.append(("canceled", o.id, o.remaining))  # unfilled market qty
+                self._seq += 1
+                self.events.append(("canceled", o.id, o.remaining, self._seq, self._clock()))
                 o.remaining = 0
             else:
                 self._rest(o)
@@ -168,7 +201,9 @@ class Book:
                 traded = min(o.remaining, resting.remaining)
                 o.remaining -= traded
                 resting.remaining -= traded
-                self.events.append(("trade", best, traded, o.id, resting.id))
+                self._seq += 1
+                self.events.append(
+                    ("trade", best, traded, o.id, resting.id, self._seq, self._clock()))
                 if resting.remaining == 0:
                     level.popleft()
                     live[best] -= 1
@@ -202,7 +237,7 @@ def demo():
     b = Book()
     b.limit(SELL, 100, 10)
     b.limit(BUY, 100, 10)
-    assert [e for e in b.events if e[0] == "trade"] == [("trade", 100, 10, 2, 1)]
+    assert [e[:5] for e in b.events if e[0] == "trade"] == [("trade", 100, 10, 2, 1)]
     assert b.best_bid() is None and b.best_ask() is None, "book should be empty"
     _check_invariants(b)
 
@@ -276,6 +311,27 @@ def demo():
     trades = [e for e in b.events if e[0] == "trade"]
     assert len(trades) == 1 and trades[0][4] == alive, "filled a cancelled order"
     _check_invariants(b)
+
+    # every event is stamped with a monotonic sequence number and a timestamp
+    b = Book()
+    b.limit(SELL, 100, 5)
+    b.limit(BUY, 100, 5)
+    oid = b.limit(BUY, 99, 5)
+    b.cancel(oid)
+    seqs = [e[-2] for e in b.events]
+    assert seqs == list(range(1, len(seqs) + 1)), f"seq must be dense and monotonic: {seqs}"
+    ts = [e[-1] for e in b.events]
+    assert all(ts[i] <= ts[i + 1] for i in range(len(ts) - 1)), "timestamps went backwards"
+    assert all(isinstance(t, int) for t in ts), "timestamps must be integer nanoseconds"
+
+    # an injected clock makes the log reproducible, which a wall clock cannot be
+    def run_with_counter():
+        bk = Book(clock=counter_clock())
+        bk.limit(SELL, 100, 5)
+        bk.limit(BUY, 100, 5)
+        return bk.events
+    assert run_with_counter() == run_with_counter(), "injected clock must be deterministic"
+    assert run_with_counter()[0][-1] == 1, "counter clock should start at 1"
 
     # fractional sizes must be refused, not silently truncated to zero
     b = Book()

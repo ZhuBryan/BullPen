@@ -193,7 +193,9 @@ fn bench(ops_in: Option<Vec<Op>>, n: usize, warmup: usize) {
 /// Format, one op per line:  `L B 9998 40` | `M S 30` | `X 42`
 fn replay(path: &str) {
     let text = fs::read_to_string(path).expect("could not read op file");
-    let mut book = Book::new();
+    // Deterministic timestamps: this log is for comparison, so it must be
+    // reproducible rather than reflecting whatever the clock said.
+    let mut book = Book::deterministic();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {

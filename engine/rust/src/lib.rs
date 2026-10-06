@@ -27,6 +27,7 @@
 //! float rounding are silent.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::time::Instant;
 
 pub type Price = i64;
 pub type Qty = i64;
@@ -59,52 +60,97 @@ pub struct Order {
 
 /// Everything the engine emits. Formatted identically to the Python side so the
 /// two logs can be diffed directly.
+///
+/// Every event carries a monotonic `seq` and a `ts_ns` timestamp, the way a real
+/// venue's feed does. `seq` is the authoritative ordering because it is
+/// deterministic and survives replay; `ts_ns` is nanoseconds since the book was
+/// created and is wall-clock-ish, so it is deliberately NOT part of `encode()`
+/// (see that method).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     Accepted {
+        seq: u64,
+        ts_ns: u64,
         id: OrderId,
         side: Side,
         price: Option<Price>,
         qty: Qty,
     },
     Trade {
+        seq: u64,
+        ts_ns: u64,
         price: Price,
         qty: Qty,
         aggressor: OrderId,
         resting: OrderId,
     },
     Canceled {
+        seq: u64,
+        ts_ns: u64,
         id: OrderId,
         remaining: Qty,
     },
     RejectCancel {
+        seq: u64,
+        ts_ns: u64,
         id: OrderId,
     },
 }
 
 impl Event {
+    /// Wire form used for the differential test against the Python engine.
+    ///
+    /// `seq` is included because it is deterministic: identical input must
+    /// produce identical sequence numbers in both engines. `ts_ns` is excluded
+    /// because a wall clock is process-local by definition, so two engines can
+    /// never agree on it and comparing it would make the test fail for a reason
+    /// that says nothing about correctness.
     pub fn encode(&self) -> String {
         match *self {
             Event::Accepted {
+                seq,
                 id,
                 side,
                 price,
                 qty,
+                ..
             } => {
                 let p = match price {
                     Some(v) => v.to_string(),
                     None => "M".to_string(),
                 };
-                format!("A {} {} {} {}", id, side.as_char(), p, qty)
+                format!("{} A {} {} {} {}", seq, id, side.as_char(), p, qty)
             }
             Event::Trade {
+                seq,
                 price,
                 qty,
                 aggressor,
                 resting,
-            } => format!("T {} {} {} {}", price, qty, aggressor, resting),
-            Event::Canceled { id, remaining } => format!("C {} {}", id, remaining),
-            Event::RejectCancel { id } => format!("R {}", id),
+                ..
+            } => format!("{} T {} {} {} {}", seq, price, qty, aggressor, resting),
+            Event::Canceled { seq, id, remaining, .. } => {
+                format!("{} C {} {}", seq, id, remaining)
+            }
+            Event::RejectCancel { seq, id, .. } => format!("{} R {}", seq, id),
+        }
+    }
+
+    pub fn seq(&self) -> u64 {
+        match *self {
+            Event::Accepted { seq, .. }
+            | Event::Trade { seq, .. }
+            | Event::Canceled { seq, .. }
+            | Event::RejectCancel { seq, .. } => seq,
+        }
+    }
+
+    pub fn ts_ns(&self) -> u64 {
+        match *self {
+            Event::Accepted { ts_ns, .. }
+            | Event::Trade { ts_ns, .. }
+            | Event::Canceled { ts_ns, .. }
+            | Event::RejectCancel { ts_ns, .. } => ts_ns,
         }
     }
 }
@@ -123,6 +169,11 @@ pub struct Book {
     index: HashMap<OrderId, usize>, // id -> slab slot, for O(1) cancel
     pub events: Vec<Event>,
     next_id: OrderId,
+    seq: u64,
+    start: Instant,
+    /// When set, timestamps come from the sequence number instead of the clock.
+    /// Makes a log reproducible, which a wall clock can never be.
+    deterministic_ts: bool,
 }
 
 impl Default for Book {
@@ -140,7 +191,30 @@ impl Book {
             index: HashMap::with_capacity(1024),
             events: Vec::with_capacity(1024),
             next_id: 1,
+            seq: 0,
+            start: Instant::now(),
+            deterministic_ts: false,
         }
+    }
+
+    /// Timestamps mirror the sequence number, so the log is byte-reproducible.
+    pub fn deterministic() -> Self {
+        let mut b = Self::new();
+        b.deterministic_ts = true;
+        b
+    }
+
+    /// Next (seq, ts_ns) pair. One clock read per event, which is what a real
+    /// feed costs: measured at roughly 6% of throughput in the Python port.
+    #[inline]
+    fn stamp(&mut self) -> (u64, u64) {
+        self.seq += 1;
+        let ts = if self.deterministic_ts {
+            self.seq
+        } else {
+            self.start.elapsed().as_nanos() as u64
+        };
+        (self.seq, ts)
     }
 
     pub fn best_bid(&self) -> Option<Price> {
@@ -180,7 +254,10 @@ impl Book {
             remaining: qty,
             cancelled: false,
         });
+        let (seq, ts_ns) = self.stamp();
         self.events.push(Event::Accepted {
+            seq,
+            ts_ns,
             id,
             side,
             price,
@@ -194,7 +271,10 @@ impl Book {
             match price {
                 // A market order never rests; the unfilled part is cancelled.
                 None => {
+                    let (seq, ts_ns) = self.stamp();
                     self.events.push(Event::Canceled {
+                        seq,
+                        ts_ns,
                         id,
                         remaining,
                     });
@@ -215,7 +295,8 @@ impl Book {
         let slot = match self.index.remove(&id) {
             Some(s) => s,
             None => {
-                self.events.push(Event::RejectCancel { id });
+                let (seq, ts_ns) = self.stamp();
+                self.events.push(Event::RejectCancel { seq, ts_ns, id });
                 return false;
             }
         };
@@ -234,7 +315,8 @@ impl Book {
                 }
             }
         }
-        self.events.push(Event::Canceled { id, remaining });
+        let (seq, ts_ns) = self.stamp();
+        self.events.push(Event::Canceled { seq, ts_ns, id, remaining });
         true
     }
 
@@ -294,7 +376,10 @@ impl Book {
                 self.slab[slot].remaining -= traded;
                 self.slab[resting_slot].remaining -= traded;
                 let resting_id = self.slab[resting_slot].id;
+                let (seq, ts_ns) = self.stamp();
                 self.events.push(Event::Trade {
+                    seq,
+                    ts_ns,
                     price: best,
                     qty: traded,
                     aggressor: taker_id,
@@ -362,10 +447,42 @@ mod tests {
                     qty,
                     aggressor,
                     resting,
+                    ..
                 } => Some((price, qty, aggressor, resting)),
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn every_event_is_stamped_and_ordered() {
+        let mut b = Book::new();
+        b.limit(Side::Sell, 100, 5);
+        b.limit(Side::Buy, 100, 5);
+        let dead = b.limit(Side::Buy, 99, 5);
+        b.cancel(dead);
+        b.cancel(9999); // reject
+
+        let seqs: Vec<u64> = b.events.iter().map(|e| e.seq()).collect();
+        let expected: Vec<u64> = (1..=seqs.len() as u64).collect();
+        assert_eq!(seqs, expected, "seq must be dense and monotonic");
+
+        let ts: Vec<u64> = b.events.iter().map(|e| e.ts_ns()).collect();
+        for w in ts.windows(2) {
+            assert!(w[0] <= w[1], "timestamps went backwards");
+        }
+    }
+
+    #[test]
+    fn deterministic_mode_reproduces_the_log() {
+        let run = || {
+            let mut b = Book::deterministic();
+            b.limit(Side::Sell, 100, 5);
+            b.limit(Side::Buy, 100, 5);
+            b.events.clone()
+        };
+        assert_eq!(run(), run(), "deterministic clock must reproduce exactly");
+        assert_eq!(run()[0].ts_ns(), 1, "deterministic ts mirrors seq");
     }
 
     #[test]

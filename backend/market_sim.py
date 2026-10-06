@@ -191,7 +191,8 @@ class Simulation:
         for ev in self.book.events[self._seen_events:]:
             if ev[0] != "trade":
                 continue
-            _, price, qty, aggressor_id, resting_id = ev
+            # Index rather than unpack: events carry trailing seq/ts fields.
+            price, qty, aggressor_id, resting_id = ev[1], ev[2], ev[3], ev[4]
             for oid in (aggressor_id, resting_id):
                 who = self.owner.get(oid)
                 if who:

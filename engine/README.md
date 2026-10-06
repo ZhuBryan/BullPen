@@ -53,6 +53,8 @@ Both engines replaying the **same 200,000-op file**, single thread, one machine,
 
 Correctness is established separately and first: `diff_test.py` feeds both engines the same stream and compares event logs line by line. They match exactly, 24,065 events on a 20,000-op file. Speed without that check is worthless.
 
+**These numbers predate event timestamping.** Every event now carries a monotonic sequence number and a nanosecond timestamp, which costs **16.5% of throughput in Python** (267,271 down to 223,025 ops/sec on the same 200,000-op file), of which about 6 points is the clock read itself and the rest is the wider event tuple. That is the honest price of a feed that looks like a real venue's, and it is why the clock is injectable: pass a counter and you get the structure without the syscall. Re-run both benchmarks to refresh the table above.
+
 **Reading the p50 honestly.** On Windows the timer reports 0ns between two back-to-back calls, because QueryPerformanceCounter ticks at roughly 100ns. The Rust p50 of 200ns is therefore about two clock ticks, at the measurement floor rather than a precise figure. The throughput number does not use a per-op timer and independently agrees (294 ns/op), so quote throughput and p99, and say so if asked about the median. The binary prints this warning itself whenever the measured timer overhead is 0.
 
 **Where the tail comes from.** Both engines still show a multi-millisecond worst case, and neither is a bug in the matching logic: it is the allocator growing the event log and, in Python, the garbage collector. That is why p99.9 is quoted rather than the max, and why the max is shown at all instead of hidden.
@@ -62,6 +64,17 @@ Correctness is established separately and first: `diff_test.py` feeds both engin
 ## Design decisions
 
 **Integer tick prices, never floats.** `0.1 + 0.2 != 0.3`. Float money bugs are silent and unrecoverable. Conversion happens only at the edges.
+
+**Sequence numbers are the ordering, not timestamps.** Every event carries both, the way an ITCH feed does, but `seq` is authoritative: it is dense, monotonic, and reproducible across a replay, while a clock reading is process-local and can be identical for two events on a coarse timer. So the differential test compares sequence numbers and deliberately ignores timestamps, since two engines can never agree on a wall clock and failing on that would say nothing about whether the matching logic agrees. The clock is injectable for the same reason: `Book(clock=counter_clock())` in Python and `Book::deterministic()` in Rust make a log byte-reproducible.
+
+Event payloads:
+
+| event | fields (before `seq`, `ts_ns`) |
+|---|---|
+| `accepted` | id, side, price (`M` for market), qty |
+| `trade` | price, qty, aggressor id, resting id |
+| `canceled` | id, remaining |
+| `reject_cancel` | id |
 
 **Lazy cancellation with per-level live counts.** Cancelling flags the order rather than unlinking it, and matching skips the husks. The live counter is not optional: without it, a level holding nothing but cancelled orders would keep advertising a price and the book would quote a level that cannot trade.
 

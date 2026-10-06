@@ -25,9 +25,9 @@ import sys
 from pathlib import Path
 
 try:
-    from engine.orderbook import BUY, SELL, Book
+    from engine.orderbook import BUY, SELL, Book, counter_clock
 except ImportError:
-    from orderbook import BUY, SELL, Book
+    from orderbook import BUY, SELL, Book, counter_clock
 
 RUST_BIN = Path(__file__).parent / "rust" / "target" / "release" / "bullpen_engine"
 
@@ -54,24 +54,31 @@ def generate(n, seed=42):
 
 
 def encode(ev):
-    """Must match Event::encode in rust/src/lib.rs exactly."""
-    kind = ev[0]
+    """Must match Event::encode in rust/src/lib.rs exactly.
+
+    `seq` is compared because it is deterministic: the same input must produce
+    the same sequence numbers in both engines. The timestamp (ev[-1]) is NOT
+    compared, because a clock reading is process-local and the two engines can
+    never agree on it. Diffing it would fail for a reason that says nothing
+    about whether the matching logic agrees.
+    """
+    kind, seq = ev[0], ev[-2]
     if kind == "accepted":
-        _, oid, side, price, qty = ev
-        return f"A {oid} {side} {'M' if price is None else price} {qty}"
+        oid, side, price, qty = ev[1], ev[2], ev[3], ev[4]
+        return f"{seq} A {oid} {side} {'M' if price is None else price} {qty}"
     if kind == "trade":
-        _, price, qty, aggressor, resting = ev
-        return f"T {price} {qty} {aggressor} {resting}"
+        return f"{seq} T {ev[1]} {ev[2]} {ev[3]} {ev[4]}"
     if kind == "canceled":
-        _, oid, remaining = ev
-        return f"C {oid} {remaining}"
+        return f"{seq} C {ev[1]} {ev[2]}"
     if kind == "reject_cancel":
-        return f"R {ev[1]}"
+        return f"{seq} R {ev[1]}"
     raise ValueError(f"unknown event {ev!r}")
 
 
 def replay(path):
-    book = Book()
+    # Counter clock, matching the Rust side's Book::deterministic(): this log is
+    # for comparison, so it must be reproducible rather than clock-dependent.
+    book = Book(clock=counter_clock())
     for line in Path(path).read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):

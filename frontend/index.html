@@ -58,8 +58,10 @@ body::before{content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
   background-image:linear-gradient(rgba(255,255,255,0.016) 1px,transparent 1px),
     linear-gradient(90deg,rgba(255,255,255,0.016) 1px,transparent 1px);
   background-size:46px 46px;
-  -webkit-mask-image:radial-gradient(ellipse 90% 55% at 50% 0%,#000 20%,transparent 78%);
-  mask-image:radial-gradient(ellipse 90% 55% at 50% 0%,#000 20%,transparent 78%);}
+  /* starts below the chrome so it never sits behind the tab row */
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 96px,#000 200px,transparent 70%);
+  mask-image:linear-gradient(to bottom,transparent 0,transparent 96px,#000 200px,transparent 70%);
+  opacity:.6;}
 body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-50%);
   width:1100px;height:620px;z-index:-2;pointer-events:none;
   background:radial-gradient(ellipse at center,rgba(76,123,243,0.11),transparent 68%);}
@@ -75,7 +77,7 @@ body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-
 /* ---- Topbar (glass, sticky) ---- */
 .topbar{height:56px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:2px;
   border-bottom:1px solid var(--border);padding:0 18px;
-  background:rgba(8,10,16,0.72);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);}
+  background:var(--bg);}
 h1.brand{margin:0;}
 .brand{display:flex;align-items:center;gap:10px;font-size:var(--t-lg);font-weight:650;letter-spacing:-0.02em;padding-right:20px;margin-right:10px;flex-shrink:0;border-right:1px solid var(--border);height:26px;}
 .brand .mark{width:26px;height:26px;flex-shrink:0;border-radius:var(--r-sm);
@@ -83,7 +85,7 @@ h1.brand{margin:0;}
   display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px -2px var(--accent-glow),inset 0 1px 0 rgba(255,255,255,0.06);}
 .brand .word{background:linear-gradient(180deg,#ffffff,#b6c2db);-webkit-background-clip:text;background-clip:text;color:transparent;}
 .tabnav{display:flex;gap:2px;}
-.tabbtn{position:relative;height:56px;padding:0 15px;background:transparent;border:none;color:var(--muted);font-size:var(--t-base);font-weight:520;cursor:pointer;transition:color 0.15s,background 0.15s;font-family:inherit;border-radius:var(--r-sm) 7px 0 0;}
+.tabbtn{position:relative;height:56px;padding:0 15px;background:transparent;border:none;box-shadow:none;color:var(--muted);font-size:var(--t-base);font-weight:520;cursor:pointer;transition:color 0.15s,background 0.15s;font-family:inherit;border-radius:var(--r-sm) var(--r-sm) 0 0;}
 .tabbtn:hover{color:var(--text);background:rgba(255,255,255,0.035);}
 .tabbtn.active{color:var(--text);}
 .tabbtn.active::after{content:'';position:absolute;left:11px;right:11px;bottom:-1px;height:2px;border-radius:var(--r-xs);background:linear-gradient(90deg,var(--accent),var(--accentH));box-shadow:0 0 12px var(--accent-glow);}
@@ -152,7 +154,7 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .price-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap;}
 .price-head h2{margin:0;}
 .seg{display:inline-flex;border:1px solid var(--border2);border-radius:var(--r-sm);overflow:hidden;}
-.seg button{height:26px;padding:0 12px;background:transparent;border:none;border-radius:0;color:var(--muted);font-size:var(--t-sm);font-weight:500;}
+.seg button{height:26px;padding:0 12px;background:transparent;border:none;box-shadow:none;border-radius:0;color:var(--muted);font-size:var(--t-sm);font-weight:500;}
 .seg button.active{background:var(--surface2);color:var(--text);}
 .seg button:hover{color:var(--text);}
 .candle-legend{display:flex;gap:14px;font-size:var(--t-xs);color:var(--muted);align-items:center;font-family:'JetBrains Mono',monospace;}
@@ -213,12 +215,12 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 
 /* ---- Chips ---- */
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
-.chip{height:28px;padding:0 12px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);font-size:var(--t-sm);font-weight:600;font-family:'JetBrains Mono',monospace;border-radius:var(--r-pill);cursor:pointer;transition:border-color 0.15s,background 0.15s;}
+.chip{height:28px;padding:0 12px;background:var(--surface2);border:1px solid var(--border);box-shadow:none;color:var(--accent);font-size:var(--t-sm);font-weight:600;font-family:'JetBrains Mono',monospace;border-radius:var(--r-pill);cursor:pointer;transition:border-color 0.15s,background 0.15s;}
 .chip:hover{border-color:var(--accent);background:rgba(76,123,243,0.12);}
 
 /* ---- Emoji picker ---- */
 .emoji-row{display:flex;flex-wrap:wrap;gap:6px;}
-.emoji-btn{height:36px;width:40px;background:var(--surface2);border:1px solid var(--border);font-size:var(--t-lg);border-radius:var(--r-sm);padding:0;cursor:pointer;}
+.emoji-btn{height:36px;width:40px;background:var(--surface2);border:1px solid var(--border);box-shadow:none;font-size:var(--t-lg);border-radius:var(--r-sm);padding:0;cursor:pointer;}
 .emoji-btn:hover{border-color:var(--border2);}
 .emoji-btn.selected{border-color:var(--accent);background:rgba(76,123,243,0.12);}
 
@@ -443,7 +445,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
       </div>
 
       <div class="card" id="arenaChartPanel" style="display:none">
-        <h2>Equity — each fighter starts at $10,000</h2>
+        <h2>Equity: each fighter starts at $10,000</h2>
         <div class="chart-box chart-lg"><canvas id="arenaChart"></canvas></div>
       </div>
 
@@ -475,10 +477,10 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
           <div class="emoji-row" id="emojiRow" role="radiogroup" aria-labelledby="emojiLabel"></div>
         </div>
         <div class="field mb-3">
-          <label for="agentBuy">Buy rule — go long next day if…</label><input id="agentBuy" class="rule-input" placeholder="e.g. RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)" spellcheck="false">
+          <label for="agentBuy">Buy rule: go long next day if</label><input id="agentBuy" class="rule-input" placeholder="e.g. RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)" spellcheck="false">
         </div>
         <div class="field" style="margin-bottom:4px">
-          <label for="agentSell">Sell rule — go to cash next day if…</label><input id="agentSell" class="rule-input" placeholder="e.g. RSI(14) &gt; 70" spellcheck="false">
+          <label for="agentSell">Sell rule: go to cash next day if</label><input id="agentSell" class="rule-input" placeholder="e.g. RSI(14) &gt; 70" spellcheck="false">
         </div>
         <div class="chips" id="agentChips"></div>
         <p id="agentRuleStatus" class="rule-status"></p>
@@ -494,9 +496,9 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
             <code>CLOSE</code> · <code>SMA(n)</code> / <code>EMA(n)</code> · <code>RSI(n)</code> · <code>MOM(n)</code><br><br>
             <b>Examples</b> (click to fill the form):
             <ul style="margin:8px 0 0 16px;line-height:2">
-              <li><button type="button" class="copy-ex" data-buy="RSI(14) < 30 AND CLOSE > SMA(200)" data-sell="RSI(14) > 70">Dip buyer — buy <code>RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)</code>, sell <code>RSI(14) &gt; 70</code></button></li>
-              <li><button type="button" class="copy-ex" data-buy="SMA(20) > SMA(50)" data-sell="SMA(20) < SMA(50)">Trend follower — buy <code>SMA(20) &gt; SMA(50)</code>, sell <code>SMA(20) &lt; SMA(50)</code></button></li>
-              <li><button type="button" class="copy-ex" data-buy="CLOSE > 0" data-sell="CLOSE < 0">Buy &amp; hold — buy <code>CLOSE &gt; 0</code>, sell <code>CLOSE &lt; 0</code></button></li>
+              <li><button type="button" class="copy-ex" data-buy="RSI(14) < 30 AND CLOSE > SMA(200)" data-sell="RSI(14) > 70">Dip buyer: buy <code>RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)</code>, sell <code>RSI(14) &gt; 70</code></button></li>
+              <li><button type="button" class="copy-ex" data-buy="SMA(20) > SMA(50)" data-sell="SMA(20) < SMA(50)">Trend follower: buy <code>SMA(20) &gt; SMA(50)</code>, sell <code>SMA(20) &lt; SMA(50)</code></button></li>
+              <li><button type="button" class="copy-ex" data-buy="CLOSE > 0" data-sell="CLOSE < 0">Buy &amp; hold: buy <code>CLOSE &gt; 0</code>, sell <code>CLOSE &lt; 0</code></button></li>
             </ul>
           </div>
         </details>
@@ -530,7 +532,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         </div>
         <div class="field" style="margin-bottom:8px" id="aiKeyField">
           <label for="aiKey">API key
-            <span class="ai-hint">— stored in this browser, sent to the provider via this server, never saved server-side</span>
+            <span class="ai-hint">(stored in this browser, sent to the provider via this server, never saved server-side)</span>
           </label>
           <input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key">
           <button type="button" class="ghost-sm" style="margin-top:6px;align-self:flex-start" onclick="aiForgetKey()">Forget key</button>
@@ -540,7 +542,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
           <input id="aiBaseUrl" spellcheck="false" placeholder="http://localhost:11434/v1">
         </div>
         <div class="field">
-          <label for="aiModel">Model name <span class="ai-hint">— optional</span></label>
+          <label for="aiModel">Model name <span class="ai-hint">(optional)</span></label>
           <input id="aiModel" spellcheck="false" placeholder="provider default">
         </div>
         <button id="aiBtn" onclick="aiGenerate()" style="margin-top:14px;width:100%">Generate &amp; backtest</button>
@@ -606,7 +608,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <div class="vol-label">Volume · ▲ buy ▼ sell</div>
       </div>
       <div class="card">
-        <h2>Equity curve — strategy vs. buy &amp; hold</h2>
+        <h2>Equity curve : strategy vs. buy &amp; hold</h2>
         <div class="chart-box chart-md"><canvas id="equityChart"></canvas></div>
       </div>
       <div class="card">
@@ -649,8 +651,8 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
     <div class="main-col">
       <!-- Optimizer -->
       <div class="card">
-        <h2>Optimizer — parameter sweep</h2>
-        <p class="sub mb-4">Try every combination of two settings and rank by objective. Best cell = best in this date range only — not a guarantee going forward.</p>
+        <h2>Optimizer · parameter sweep</h2>
+        <p class="sub mb-4">Try every combination of two settings and rank by objective. Best cell = best in this date range only · not a guarantee going forward.</p>
         <div class="controls mb-4">
           <div class="field grid-field"><label id="optParam1Label">Param 1</label><input id="optParam1Values" class="values w-160" placeholder="e.g. 5,10,15,20" ></div>
           <div class="field grid-field"><label id="optParam2Label">Param 2</label><input id="optParam2Values" class="values w-160" placeholder="e.g. 50,100,150,200" ></div>
@@ -667,7 +669,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         </div>
         <p id="optError" class="error"></p>
         <div id="optResults" style="display:none;margin-top:16px">
-          <p class="sub mb-3" >Heatmap of <span id="optObjectiveLabel"></span> — outlined cell is best.</p>
+          <p class="sub mb-3" >Heatmap of <span id="optObjectiveLabel"></span> · outlined cell is best.</p>
           <div style="overflow-x:auto"><table class="heatmap-table" id="optHeatmap"></table></div>
           <h2 style="margin-top:20px">Best combination</h2>
           <dl class="metrics-grid" id="optBestCards"></dl>
@@ -677,7 +679,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
       <!-- Walk-Forward -->
       <div class="card">
         <h2>Walk-Forward optimization</h2>
-        <p class="note">Splits the range into chunks: tune on one, test on the next. The combined curve uses ONLY out-of-sample results — a much more honest preview of live performance.</p>
+        <p class="note">Splits the range into chunks: tune on one, test on the next. The combined curve uses ONLY out-of-sample results · a much more honest preview of live performance.</p>
         <div class="controls mb-4">
           <div class="field grid-field"><label id="wfParam1Label">Param 1</label><input id="wfParam1Values" class="values w-160" ></div>
           <div class="field grid-field"><label id="wfParam2Label">Param 2</label><input id="wfParam2Values" class="values w-160" ></div>
@@ -709,7 +711,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
       <!-- Monte Carlo -->
       <div class="card">
         <h2>Monte Carlo simulation</h2>
-        <p class="note">Reshuffles the strategy's day-by-day returns thousands of times. NOT a forecast — it shows how much of the result might be luck vs. robust edge.</p>
+        <p class="note">Reshuffles the strategy's day-by-day returns thousands of times. NOT a forecast · it shows how much of the result might be luck vs. robust edge.</p>
         <div class="controls mb-4">
           <div class="field"><label for="mcSims">Simulations</label><input id="mcSims" type="number" min="100" max="2000" value="500" style="width:100px"></div>
           <button id="mcBtn" onclick="runMonteCarlo()">Run Monte Carlo</button>
@@ -717,7 +719,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <p id="mcError" class="error"></p>
         <div id="mcResults" style="display:none;margin-top:16px">
           <dl class="metrics-grid" id="mcMetricCards" style="margin-bottom:20px"></dl>
-          <h2>Simulated equity — percentile bands (5/25/50/75/95)</h2>
+          <h2>Simulated equity · percentile bands (5/25/50/75/95)</h2>
           <div class="chart-box chart-md"><canvas id="mcChart"></canvas></div>
         </div>
       </div>
@@ -775,7 +777,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
       </div>
 
       <div class="card">
-        <h2>Feature deep-dive — rolling indicators over time</h2>
+        <h2>Feature deep-dive · rolling indicators over time</h2>
         <p class="sub" style="margin-bottom:16px;font-size:12px">Five signals normalized to [0,1] so all fit one chart. Hover for values.</p>
         <div class="feat-legend" id="featLegend"></div>
         <div class="chart-box" style="height:260px"><canvas id="regFeatChart"></canvas></div>
@@ -790,7 +792,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
 
       <div class="card">
         <h2>Regime-gated backtest</h2>
-        <p class="note">Only trade when the market is in a specific regime — fewer trades but potentially better odds on each.</p>
+        <p class="note">Only trade when the market is in a specific regime · fewer trades but potentially better odds on each.</p>
         <div class="controls mb-4">
           <div class="field"><label for="regBtTicker">Ticker</label><input id="regBtTicker" style="width:90px"></div>
           <div class="field"><label for="regBtStart">Start</label><input id="regBtStart" type="date" style="width:140px"></div>
@@ -810,7 +812,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <div id="regGatedResults">
           <div class="regime-interp" id="regBtInterp"></div>
           <dl class="metrics-grid" id="regBtMetricCards" style="margin-bottom:20px"></dl>
-          <h2>Equity — gated strategy vs. buy &amp; hold</h2>
+          <h2>Equity · gated strategy vs. buy &amp; hold</h2>
           <div class="chart-box chart-md"><canvas id="regBtChart"></canvas></div>
         </div>
       </div>
@@ -897,7 +899,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
     <div class="main-col" id="engineResults" style="display:none">
 
     <div class="card">
-      <h2>Simulated market — price is produced, not downloaded</h2>
+      <h2>Simulated market : price is produced, not downloaded</h2>
       <p class="sub mb-4">
         Trading bots post real orders into the matching engine and trade against each other.
         Nobody supplies a price: the candles below are what they actually traded at.
@@ -925,7 +927,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
     </div>
 
     <div class="card">
-      <h2>Research agent — searches, then discounts itself</h2>
+      <h2>Research agent · searches, then discounts itself</h2>
       <p class="sub mb-4">
         The agent proposes strategies, backtests them, and refines. The interesting part is
         the critic: search enough variations and one will look brilliant by pure luck, so

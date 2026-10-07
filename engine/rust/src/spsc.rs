@@ -275,7 +275,7 @@ mod tests {
         {
             let (mut p, mut c) = channel::<Counted>(8);
             for _ in 0..5 {
-                p.push(Counted(Arc::clone(&drops))).ok();
+                let _ = p.push(Counted(Arc::clone(&drops)));
             }
             // Read two, abandon three still queued.
             assert!(c.pop().is_some());

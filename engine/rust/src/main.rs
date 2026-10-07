@@ -10,6 +10,7 @@
 //! languages. Comparing two engines on different input proves nothing.
 
 use bullpen_engine::{Book, Side};
+use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::time::Instant;

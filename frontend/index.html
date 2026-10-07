@@ -34,23 +34,23 @@
   --red:      #ef4444;
   --amber:    #f59e0b;
   --gold:     #eab308;
-  /* Spacing scale. Every gap should come from here rather than an ad-hoc pixel
-     value, which is what makes rhythm feel deliberate instead of arbitrary. */
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px;
-  /* Type scale. */
-  --t-xs: 11px; --t-sm: 12px; --t-base: 13px; --t-md: 14px;
-  --t-lg: 16px; --t-xl: 20px; --t-2xl: 26px;
-  --r-xs:     4px;
-  --r:        11px;
-  --r-sm:     8px;
-  --r-pill:   100px;
+  /* ---- Spacing scale. Every gap comes from here, never an ad-hoc pixel. ---- */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px;
+
+  /* ---- Type scale. No fractional sizes, no one-off values. ---- */
+  --t-2xs: 10px; --t-xs: 11px; --t-sm: 12px; --t-base: 13px;
+  --t-md: 14px;  --t-lg: 16px; --t-xl: 18px; --t-2xl: 26px; --t-3xl: 28px;
+
+  /* ---- Radii. Four steps: cells, controls, cards, pills. ---- */
+  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-pill: 100px;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.45);
   --shadow:    0 6px 24px -6px rgba(0,0,0,0.55);
   --shadow-lg: 0 16px 48px -12px rgba(0,0,0,0.65);
 }
 *{box-sizing:border-box;margin:0;}
 html{color-scheme:dark;}
-body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;position:relative;min-height:100vh;}
+body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,sans-serif;font-size:var(--t-base);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;position:relative;min-height:100vh;}
 
 /* Signature "terminal" backdrop: a faint grid that fades out downward, plus a
    soft electric-blue glow up top. Fixed so it never scrolls. */
@@ -67,7 +67,7 @@ body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-
 /* Custom scrollbars — thin, on-brand. */
 *::-webkit-scrollbar{width:10px;height:10px;}
 *::-webkit-scrollbar-track{background:transparent;}
-*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:10px;border:2px solid transparent;background-clip:padding-box;}
+*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:var(--r-md);border:2px solid transparent;background-clip:padding-box;}
 *::-webkit-scrollbar-thumb:hover{background:#39445e;}
 *{scrollbar-width:thin;scrollbar-color:var(--border2) transparent;}
 ::selection{background:rgba(76,123,243,0.32);color:#fff;}
@@ -76,38 +76,39 @@ body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-
 .topbar{height:56px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:2px;
   border-bottom:1px solid var(--border);padding:0 18px;
   background:rgba(8,10,16,0.72);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);}
-.brand{display:flex;align-items:center;gap:10px;font-size:15.5px;font-weight:650;letter-spacing:-0.02em;padding-right:20px;margin-right:10px;flex-shrink:0;border-right:1px solid var(--border);height:26px;}
-.brand .mark{width:26px;height:26px;flex-shrink:0;border-radius:7px;
+h1.brand{margin:0;}
+.brand{display:flex;align-items:center;gap:10px;font-size:var(--t-lg);font-weight:650;letter-spacing:-0.02em;padding-right:20px;margin-right:10px;flex-shrink:0;border-right:1px solid var(--border);height:26px;}
+.brand .mark{width:26px;height:26px;flex-shrink:0;border-radius:var(--r-sm);
   background:linear-gradient(145deg,#1d2c52,#0d1220);border:1px solid var(--border2);
   display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px -2px var(--accent-glow),inset 0 1px 0 rgba(255,255,255,0.06);}
 .brand .word{background:linear-gradient(180deg,#ffffff,#b6c2db);-webkit-background-clip:text;background-clip:text;color:transparent;}
 .tabnav{display:flex;gap:2px;}
-.tabbtn{position:relative;height:56px;padding:0 15px;background:transparent;border:none;color:var(--muted);font-size:13px;font-weight:520;cursor:pointer;transition:color 0.15s,background 0.15s;font-family:inherit;border-radius:7px 7px 0 0;}
+.tabbtn{position:relative;height:56px;padding:0 15px;background:transparent;border:none;color:var(--muted);font-size:var(--t-base);font-weight:520;cursor:pointer;transition:color 0.15s,background 0.15s;font-family:inherit;border-radius:var(--r-sm) 7px 0 0;}
 .tabbtn:hover{color:var(--text);background:rgba(255,255,255,0.035);}
 .tabbtn.active{color:var(--text);}
-.tabbtn.active::after{content:'';position:absolute;left:11px;right:11px;bottom:-1px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accentH));box-shadow:0 0 12px var(--accent-glow);}
-.topbar-tag{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text2);
-  background:var(--surface2);border:1px solid var(--border2);border-radius:100px;padding:5px 12px;font-family:'JetBrains Mono',monospace;}
+.tabbtn.active::after{content:'';position:absolute;left:11px;right:11px;bottom:-1px;height:2px;border-radius:var(--r-xs);background:linear-gradient(90deg,var(--accent),var(--accentH));box-shadow:0 0 12px var(--accent-glow);}
+.topbar-tag{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:var(--t-xs);font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text2);
+  background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-pill);padding:5px 12px;font-family:'JetBrains Mono',monospace;}
 .topbar-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);}
 
 /* ---- Ticker bar ---- */
-.ticker-bar{border-bottom:1px solid var(--border);padding:0 24px;height:38px;display:flex;align-items:center;gap:18px;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:var(--text2);background:rgba(11,14,21,0.5);}
+.ticker-bar{border-bottom:1px solid var(--border);padding:0 24px;height:38px;display:flex;align-items:center;gap:18px;font-size:var(--t-sm);font-family:'JetBrains Mono',monospace;color:var(--text2);background:rgba(11,14,21,0.5);}
 
 /* ---- Page wrapper ---- */
 .page{max-width:1220px;margin:0 auto;padding:0 24px;}
 
 /* ---- Banner ---- */
-.banner{display:none;background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid var(--border2);border-left:3px solid var(--amber);color:var(--text);padding:12px 16px;font-size:13px;margin:0;border-radius:var(--r-sm);}
+.banner{display:none;background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid var(--border2);border-left:3px solid var(--amber);color:var(--text);padding:12px 16px;font-size:var(--t-base);margin:0;border-radius:var(--r-sm);}
 
 /* ---- Cards ---- */
-.card{position:relative;background:linear-gradient(180deg,var(--surface),#0c1017);border:1px solid var(--border);border-radius:var(--r);padding:18px;box-shadow:var(--shadow-sm);transition:border-color 0.2s,box-shadow 0.2s;}
+.card{position:relative;background:linear-gradient(180deg,var(--surface),#0c1017);border:1px solid var(--border);border-radius:var(--r-md);padding:18px;box-shadow:var(--shadow-sm);transition:border-color 0.2s,box-shadow 0.2s;}
 .card:hover{border-color:var(--border2);box-shadow:var(--shadow);}
 .card::before{content:'';position:absolute;top:0;left:14px;right:14px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.07),transparent);pointer-events:none;}
 
 /* ---- Inputs / selects ---- */
 /* :not(checkbox/radio) so a checkbox added outside .feat-toggle does not render
    as a full-width 34px box. */
-input:not([type="checkbox"]):not([type="radio"]),select,textarea{height:34px;padding:0 11px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);font-size:13px;width:100%;box-sizing:border-box;font-family:inherit;transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;}
+input:not([type="checkbox"]):not([type="radio"]),select,textarea{height:34px;padding:0 11px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);font-size:var(--t-base);width:100%;box-sizing:border-box;font-family:inherit;transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;}
 input:hover,select:hover,textarea:hover{border-color:#333e57;}
 textarea{height:auto;padding:9px 11px;resize:vertical;line-height:1.6;}
 input::placeholder,textarea::placeholder{color:var(--muted);}
@@ -115,19 +116,19 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 input[type="number"],input[type="date"]{font-variant-numeric:tabular-nums;}
 
 /* ---- Buttons ---- */
-button{height:34px;padding:0 16px;background:linear-gradient(180deg,var(--accentH),var(--accent));border:1px solid rgba(76,123,243,0.55);border-radius:var(--r-sm);color:#fff;font-size:13px;font-weight:550;cursor:pointer;transition:filter 0.15s,box-shadow 0.15s,transform 0.06s;font-family:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,0.18),0 2px 10px -3px var(--accent-glow);}
+button{height:34px;padding:0 16px;background:linear-gradient(180deg,var(--accentH),var(--accent));border:1px solid rgba(76,123,243,0.55);border-radius:var(--r-sm);color:#fff;font-size:var(--t-base);font-weight:550;cursor:pointer;transition:filter 0.15s,box-shadow 0.15s,transform 0.06s;font-family:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,0.18),0 2px 10px -3px var(--accent-glow);}
 button:hover{filter:brightness(1.08);box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),0 5px 16px -3px var(--accent-glow);}
 button:active{transform:translateY(1px);}
 button:disabled{opacity:.5;cursor:wait;filter:none;}
 button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 10px -3px var(--accent-glow);}
 .ghost{background:var(--surface2);border:1px solid var(--border2);color:var(--text);box-shadow:none;}
 .ghost:hover{background:var(--surface3);filter:none;border-color:#38445e;box-shadow:none;}
-.ghost-sm{height:24px;padding:0 8px;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:500;border-radius:5px;cursor:pointer;font-family:inherit;box-shadow:none;}
+.ghost-sm{height:24px;padding:0 8px;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:var(--t-sm);font-weight:500;border-radius:var(--r-sm);cursor:pointer;font-family:inherit;box-shadow:none;}
 .ghost-sm:hover{color:var(--red);border-color:var(--red);filter:none;background:rgba(239,68,68,0.08);box-shadow:none;}
 
 /* ---- Section label ---- */
-.label{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin:0 0 14px;display:flex;align-items:center;gap:8px;}
-.label::before{content:'';width:3px;height:11px;border-radius:2px;background:linear-gradient(180deg,var(--accent),var(--accentH));box-shadow:0 0 8px var(--accent-glow);}
+.label{font-size:var(--t-xs);font-weight:600;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin:0 0 14px;display:flex;align-items:center;gap:8px;}
+.label::before{content:'';width:3px;height:11px;border-radius:var(--r-xs);background:linear-gradient(180deg,var(--accent),var(--accentH));box-shadow:0 0 8px var(--accent-glow);}
 
 /* ---- Tab panels ---- */
 .tab-panel{display:none;}
@@ -149,169 +150,222 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 
 /* ---- Price / candlestick card ---- */
 .price-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap;}
-.price-head h3{margin:0;}
-.seg{display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;}
-.seg button{height:26px;padding:0 12px;background:transparent;border:none;border-radius:0;color:var(--muted);font-size:12px;font-weight:500;}
+.price-head h2{margin:0;}
+.seg{display:inline-flex;border:1px solid var(--border2);border-radius:var(--r-sm);overflow:hidden;}
+.seg button{height:26px;padding:0 12px;background:transparent;border:none;border-radius:0;color:var(--muted);font-size:var(--t-sm);font-weight:500;}
 .seg button.active{background:var(--surface2);color:var(--text);}
 .seg button:hover{color:var(--text);}
-.candle-legend{display:flex;gap:14px;font-size:11px;color:var(--muted);align-items:center;font-family:'JetBrains Mono',monospace;}
-.candle-legend span::before{content:'';display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+.candle-legend{display:flex;gap:14px;font-size:var(--t-xs);color:var(--muted);align-items:center;font-family:'JetBrains Mono',monospace;}
+.candle-legend span::before{content:'';display:inline-block;width:9px;height:9px;border-radius:var(--r-xs);margin-right:5px;vertical-align:-1px;}
 .candle-legend .up::before{background:var(--green);}
 .candle-legend .down::before{background:var(--red);}
 .vol-box{height:62px;margin-top:4px;}
-.vol-label{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:0.06em;margin-top:6px;}
-.corr-note{font-size:12px;color:var(--muted);margin-bottom:12px;}
+.vol-label{font-size:var(--t-2xs);color:var(--faint);text-transform:uppercase;letter-spacing:0.06em;margin-top:6px;}
+.corr-note{font-size:var(--t-sm);color:var(--muted);margin-bottom:12px;}
 
 /* ---- AI strategy composer ---- */
 .ai-card{border-color:var(--border2);}
 .ai-desc{width:100%;min-height:76px;resize:vertical;line-height:1.55;padding:9px 11px;}
-.ai-hint{font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;}
-.ai-err{color:var(--red);font-size:12px;margin-top:10px;display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:6px;padding:7px 10px;}
+.ai-hint{font-size:var(--t-xs);color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;}
+.ai-err{color:var(--red);font-size:var(--t-sm);margin-top:10px;display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--r-sm);padding:7px 10px;}
 .ai-rules{margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);display:none;}
-.ai-ok{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:600;margin-bottom:10px;}
+.ai-ok{display:flex;align-items:center;gap:6px;font-size:var(--t-sm);color:var(--green);font-weight:600;margin-bottom:10px;}
 .ai-rule{display:flex;gap:8px;align-items:baseline;margin-bottom:7px;}
-.ai-rule .rtag{flex:0 0 auto;width:34px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.04em;padding-top:2px;}
+.ai-rule .rtag{flex:0 0 auto;width:34px;font-family:'JetBrains Mono',monospace;font-size:var(--t-2xs);font-weight:600;letter-spacing:0.04em;padding-top:2px;}
 .ai-rule .rtag.buy{color:var(--green);} .ai-rule .rtag.sell{color:var(--red);}
-.ai-rule code{flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 9px;line-height:1.5;word-break:break-word;}
+.ai-rule code{flex:1;font-family:'JetBrains Mono',monospace;font-size:var(--t-sm);color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 9px;line-height:1.5;word-break:break-word;}
 
 /* ---- Leaderboard table ---- */
-.lb-table{width:100%;border-collapse:collapse;font-size:13px;}
-.lb-table thead th{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+.lb-table{width:100%;border-collapse:collapse;font-size:var(--t-base);}
+.lb-table thead th{font-size:var(--t-2xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
 .lb-table tbody tr{border-bottom:1px solid var(--border);transition:background 0.1s;}
 .lb-table tbody tr:hover{background:var(--surface2);}
 .lb-table tbody td{padding:9px 10px;color:var(--text);vertical-align:middle;font-variant-numeric:tabular-nums;}
-.rank-badge{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;}
+.rank-badge{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--t-2xs);font-weight:700;}
 .rank-1{background:var(--gold);color:#000;}
 /* --faint as a badge background put rank 2/3 text at ~2.2:1, effectively
    unreadable. Use a real surface with full-strength text instead. */
 .rank-2{background:var(--surface3);color:var(--text);}
 .rank-3{background:var(--surface3);color:var(--text2);}
-.pos-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:100px;text-transform:uppercase;letter-spacing:0.04em;}
+.pos-badge{font-size:var(--t-2xs);font-weight:600;padding:2px 7px;border-radius:var(--r-pill);text-transform:uppercase;letter-spacing:0.04em;}
 .pos-long{background:rgba(34,197,94,0.15);color:var(--green);}
 .pos-cash{background:rgba(90,100,128,0.2);color:var(--muted);}
 
 /* ---- Metric cards (dl/dt/dd) ---- */
 .metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;}
-.metric{background:var(--surface2);border-radius:6px;padding:12px;}
-.metric dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;}
-.metric dd{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);margin:0;font-family:'JetBrains Mono',monospace;}
+.metric{background:var(--surface2);border-radius:var(--r-sm);padding:12px;}
+.metric dt{font-size:var(--t-xs);color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;}
+.metric dd{font-size:var(--t-xl);font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);margin:0;font-family:'JetBrains Mono',monospace;}
 .metric dd.pos{color:var(--green);}
 .metric dd.neg{color:var(--red);}
 
 /* ---- Utility ---- */
 .pos{color:var(--green);}
 .neg{color:var(--red);}
-.error{color:var(--red);font-size:13px;display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:8px 12px;margin-top:8px;}
+.error{color:var(--red);font-size:var(--t-base);display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--r-sm);padding:8px 12px;margin-top:8px;}
 
 /* ---- Arena day pill ---- */
-.day-pill{background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:500;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:8px;}
+.day-pill{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 16px;font-size:var(--t-base);font-weight:500;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:8px;}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
 .day-pill.offline .dot{background:var(--amber);}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
-#arenaMsg{display:none;text-align:center;color:var(--muted);font-size:13px;padding:32px 20px;line-height:1.8;}
+#arenaMsg{display:none;text-align:center;color:var(--muted);font-size:var(--t-base);padding:32px 20px;line-height:1.8;}
 
 /* ---- Chips ---- */
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
-.chip{height:28px;padding:0 12px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;border-radius:100px;cursor:pointer;transition:border-color 0.15s,background 0.15s;}
+.chip{height:28px;padding:0 12px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);font-size:var(--t-sm);font-weight:600;font-family:'JetBrains Mono',monospace;border-radius:var(--r-pill);cursor:pointer;transition:border-color 0.15s,background 0.15s;}
 .chip:hover{border-color:var(--accent);background:rgba(76,123,243,0.12);}
 
 /* ---- Emoji picker ---- */
 .emoji-row{display:flex;flex-wrap:wrap;gap:6px;}
-.emoji-btn{height:36px;width:40px;background:var(--surface2);border:1px solid var(--border);font-size:16px;border-radius:6px;padding:0;cursor:pointer;}
+.emoji-btn{height:36px;width:40px;background:var(--surface2);border:1px solid var(--border);font-size:var(--t-lg);border-radius:var(--r-sm);padding:0;cursor:pointer;}
 .emoji-btn:hover{border-color:var(--border2);}
 .emoji-btn.selected{border-color:var(--accent);background:rgba(76,123,243,0.12);}
 
 /* ---- Rule status ---- */
-.rule-status{font-size:13px;margin-top:8px;min-height:18px;}
+.rule-status{font-size:var(--t-base);margin-top:8px;min-height:18px;}
 .rule-status.ok{color:var(--green);}
 .rule-status.bad{color:var(--red);}
 .rule-status.wait{color:var(--muted);}
 
 /* ---- Cheat sheet ---- */
 details.cheat{margin-top:16px;border-top:1px solid var(--border);padding-top:16px;}
-details.cheat summary{cursor:pointer;color:var(--accent);font-size:13px;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;}
+details.cheat summary{cursor:pointer;color:var(--accent);font-size:var(--t-base);font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;}
 details.cheat summary::-webkit-details-marker{display:none;}
 details.cheat .chev{transition:transform 0.15s;}
 details.cheat[open] .chev{transform:rotate(90deg);}
-details.cheat .body{margin-top:12px;font-size:13px;color:var(--text);line-height:1.8;}
-details.cheat code{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:12px;font-family:'JetBrains Mono',monospace;}
+details.cheat .body{margin-top:12px;font-size:var(--t-base);color:var(--text);line-height:1.8;}
+details.cheat code{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-xs);padding:1px 6px;font-size:var(--t-sm);font-family:'JetBrains Mono',monospace;}
 /* Real <button> for keyboard access, styled back down to inline text so the
    cheat sheet still reads as prose. */
 .copy-ex{display:inline;height:auto;padding:0;background:none;border:none;box-shadow:none;
   color:var(--accent);cursor:pointer;text-decoration:underline dotted;font:inherit;text-align:left;}
 .copy-ex:hover{background:none;filter:none;box-shadow:none;color:var(--accentH);}
 .copy-ex:focus-visible,details.cheat summary:focus-visible,.feat-toggle:focus-within,
-.chip:focus-visible,.emoji-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
+.chip:focus-visible,.emoji-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-xs);}
 /* Disabled styling for the non-primary controls, which had none. */
 .ghost:disabled,.ghost-sm:disabled,.chip:disabled,.emoji-btn:disabled,.seg button:disabled{
   opacity:.45;cursor:not-allowed;filter:none;}
 
 /* ---- Generic tables (analysis) ---- */
-table{width:100%;border-collapse:collapse;font-size:13px;}
+table{width:100%;border-collapse:collapse;font-size:var(--t-base);}
 th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;}
-th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;position:sticky;top:0;background:var(--surface);}
+th{color:var(--muted);font-weight:600;font-size:var(--t-xs);text-transform:uppercase;letter-spacing:0.06em;position:sticky;top:0;background:var(--surface);}
 tbody tr:hover{background:var(--surface2);}
 
 /* ---- Heatmap ---- */
 .heatmap-table{width:auto;}
 .heatmap-table th,.heatmap-table td{text-align:center;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
 .heatmap-table th:first-child,.heatmap-table td:first-child{text-align:right;color:var(--muted);font-family:inherit;font-weight:600;}
-.heatmap-cell{border-radius:4px;font-weight:600;}
+.heatmap-cell{border-radius:var(--r-xs);font-weight:600;}
 .heatmap-cell.best{outline:2px solid var(--text);outline-offset:-2px;}
-.heatmap-corner{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;}
-.note{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--text);margin-bottom:16px;line-height:1.6;}
-.grid-field input.values{width:100%;min-width:200px;font-family:'JetBrains Mono',monospace;font-size:13px;}
+.heatmap-corner{color:var(--muted);font-size:var(--t-xs);text-transform:uppercase;letter-spacing:0.06em;}
+.note{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--r-md);padding:12px 16px;font-size:var(--t-base);color:var(--text);margin-bottom:16px;line-height:1.6;}
+.grid-field input.values{width:100%;min-width:200px;font-family:'JetBrains Mono',monospace;font-size:var(--t-base);}
 .field{display:flex;flex-direction:column;gap:4px;}
-.field label,.group-label{display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
+.field label,.group-label{display:block;font-size:var(--t-xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
 .controls{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;}
-h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;}
-.sub{color:var(--muted);font-size:13px;line-height:1.6;}
-.rule-input{width:100%;font-family:'JetBrains Mono',monospace;font-size:13px;}
+h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;}
+.sub{color:var(--muted);font-size:var(--t-base);line-height:1.6;}
+.rule-input{width:100%;font-family:'JetBrains Mono',monospace;font-size:var(--t-base);}
 .w-90{width:90px;} .w-110{width:110px;} .w-150{width:150px;} .w-180{width:180px;}
 .grow{flex:1;} .mt-0{margin:0;}
 
 /* ---- Regime ---- */
-.regime-strip-wrap{margin-top:8px;border-radius:4px;overflow:hidden;}
+.regime-strip-wrap{margin-top:8px;border-radius:var(--r-xs);overflow:hidden;}
 #regimeStrip{display:block;width:100%;height:18px;}
-.regime-label{font-size:28px;font-weight:700;letter-spacing:-0.02em;font-family:'JetBrains Mono',monospace;margin-bottom:16px;}
+.regime-label{font-size:var(--t-3xl);font-weight:700;letter-spacing:-0.02em;font-family:'JetBrains Mono',monospace;margin-bottom:16px;}
 .regime-label.TRENDING{color:var(--accent);}
 .regime-label.MEAN_REVERTING{color:var(--green);}
 .regime-label.HIGH_VOLATILITY{color:var(--red);}
 .regime-label.CHOPPY{color:var(--amber);}
 .prob-row{margin-bottom:8px;}
-.prob-row .prob-label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;color:var(--text);}
-.prob-track{background:var(--surface2);border:1px solid var(--border);border-radius:100px;height:8px;overflow:hidden;}
-.prob-fill{height:100%;border-radius:100px;transition:width .4s ease;}
+.prob-row .prob-label{display:flex;justify-content:space-between;font-size:var(--t-sm);margin-bottom:3px;color:var(--text);}
+.prob-track{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-pill);height:8px;overflow:hidden;}
+.prob-fill{height:100%;border-radius:var(--r-pill);transition:width .4s ease;}
 .prob-fill.TRENDING{background:var(--accent);}
 .prob-fill.MEAN_REVERTING{background:var(--green);}
 .prob-fill.HIGH_VOLATILITY{background:var(--red);}
 .prob-fill.CHOPPY{background:var(--amber);}
 .attrib-list{margin-top:16px;}
-.attrib-item{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.attrib-item{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--border);font-size:var(--t-base);}
 .attrib-item:last-child{border-bottom:none;}
 .attrib-feat{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
 .attrib-reason{color:var(--muted);flex:1;margin:0 12px;}
 .attrib-z{color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap;}
 .feat-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
-.feat-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;}
+.feat-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:var(--t-base);}
 .feat-toggle input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px;min-width:14px;padding:0;border:none;}
-.feat-swatch{display:inline-block;width:18px;height:3px;border-radius:2px;}
+.feat-swatch{display:inline-block;width:18px;height:3px;border-radius:var(--r-xs);}
 .regime-separator{border:none;border-top:1px solid var(--border);margin:32px 0 24px;}
 #regGatedResults{display:none;}
-.regime-interp{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--text);margin-bottom:16px;line-height:1.6;}
+.regime-interp{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:var(--r-md);padding:12px 16px;font-size:var(--t-base);color:var(--text);margin-bottom:16px;line-height:1.6;}
 #regCountCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:16px;}
 
 /* ---- Regime attribution bars ---- */
 .attrib-row{display:grid;grid-template-columns:140px 1fr 80px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);}
 .attrib-row:last-child{border-bottom:none;}
-.attrib-bar-wrap{background:var(--surface2);border-radius:3px;height:8px;}
-.attrib-bar{height:8px;border-radius:3px;transition:width 0.4s ease;}
+.attrib-bar-wrap{background:var(--surface2);border-radius:var(--r-xs);height:8px;}
+.attrib-bar{height:8px;border-radius:var(--r-xs);transition:width 0.4s ease;}
 
 /* ---- Monthly heatmap ---- */
-.cal-table{border-collapse:collapse;font-size:11px;width:100%;}
-.cal-table th{padding:4px 8px;color:var(--muted);text-align:center;font-size:10px;text-transform:uppercase;font-weight:600;}
-.cal-table td{padding:5px 8px;text-align:center;border-radius:3px;font-variant-numeric:tabular-nums;min-width:48px;font-weight:500;}
+.cal-table{border-collapse:collapse;font-size:var(--t-xs);width:100%;}
+.cal-table th{padding:4px 8px;color:var(--muted);text-align:center;font-size:var(--t-2xs);text-transform:uppercase;font-weight:600;}
+.cal-table td{padding:5px 8px;text-align:center;border-radius:var(--r-xs);font-variant-numeric:tabular-nums;min-width:48px;font-weight:500;}
 .cal-table .year-cell{color:var(--muted);font-weight:500;text-align:left;padding-left:0;}
+
+/* =====================================================================
+   UTILITIES
+   A small, closed set built on the token scales. These exist so layout
+   lives in the stylesheet instead of in 130 inline style attributes,
+   where it cannot be audited, overridden, or kept consistent.
+   ===================================================================== */
+.mt-2{margin-top:var(--s-2);}  .mt-3{margin-top:var(--s-3);}  .mt-4{margin-top:var(--s-4);}
+.mb-0{margin-bottom:0;}        .mb-2{margin-bottom:var(--s-2);}
+.mb-3{margin-bottom:var(--s-3);} .mb-4{margin-bottom:var(--s-4);}
+.row{display:flex;align-items:center;}
+.row-gap{display:flex;align-items:center;gap:var(--s-4);}
+.ta-r{text-align:right;}
+.w-full{width:100%;}
+.w-160{width:160px;}
+.text-sm{font-size:var(--t-sm);}
+.text-xs{font-size:var(--t-xs);}
+.muted{color:var(--muted);}
+.num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+/* Chart frames: fixed heights belong to a named size, not a magic number. */
+.chart-sm{height:160px;} .chart-md{height:280px;} .chart-lg{height:320px;}
+
+/* =====================================================================
+   BASELINE STANDARDS
+   ===================================================================== */
+
+/* A visible focus ring on every focusable thing, not just buttons. Removing
+   or forgetting this is the most common accessibility failure there is. */
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;}
+
+/* Respect the OS "reduce motion" setting. Vestibular disorders are real and
+   this costs three lines. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important;}
+}
+
+/* Metric tiles hold tabular figures, so prose pushed through them overflows a
+   130px track in 18px mono. `.metric dd.text` is the variant for words. */
+.metric dd.text{font-family:var(--font-ui,inherit);font-size:var(--t-base);
+  font-weight:600;line-height:1.4;word-break:break-word;}
+
+/* Touch targets: 44px is the accepted minimum for anything finger-sized. The
+   desktop controls here are deliberately denser, so this applies where a
+   coarse pointer is actually in use. */
+@media (pointer: coarse){
+  button,.tabbtn,.chip,.emoji-btn,.seg button{min-height:44px;}
+}
+
+/* Tables scroll rather than blow out the layout on a narrow viewport. */
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 
 /* ---- Responsive ---- */
 @media(max-width:900px){
@@ -324,14 +378,29 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
 <body>
 
 <header class="topbar">
-  <div class="brand">Bullpen</div>
+  <h1 class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="2.2" y="5" width="2" height="6.5" rx="0.6" fill="var(--green)"/>
+        <rect x="2.75" y="3.2" width="0.9" height="2.2" fill="var(--green)"/>
+        <rect x="2.75" y="11.1" width="0.9" height="2" fill="var(--green)"/>
+        <rect x="6.9" y="3.4" width="2" height="5.4" rx="0.6" fill="var(--red)"/>
+        <rect x="7.45" y="1.8" width="0.9" height="2" fill="var(--red)"/>
+        <rect x="7.45" y="8.4" width="0.9" height="2.2" fill="var(--red)"/>
+        <rect x="11.6" y="4.4" width="2" height="7.2" rx="0.6" fill="var(--accent)"/>
+        <rect x="12.15" y="2.6" width="0.9" height="2" fill="var(--accent)"/>
+        <rect x="12.15" y="11.2" width="0.9" height="2.2" fill="var(--accent)"/>
+      </svg>
+    </span>
+    <span class="word">Bullpen</span>
+  </h1>
   <nav class="tabnav">
-    <button id="tabBtnArena"    class="tabbtn active" onclick="showTab('arena')">Arena</button>
-    <button id="tabBtnLab"      class="tabbtn" onclick="showTab('lab')">Lab</button>
+    <button id="tabBtnArena" class="tabbtn active" onclick="showTab('arena')">Arena</button>
+    <button id="tabBtnLab" class="tabbtn" onclick="showTab('lab')">Lab</button>
     <button id="tabBtnAnalysis" class="tabbtn" onclick="showTab('analysis')">Analysis</button>
-    <button id="tabBtnRegime"   class="tabbtn" onclick="showTab('regime')">Regime</button>
-    <button id="tabBtnCompare"  class="tabbtn" onclick="showTab('compare')">Compare</button>
-    <button id="tabBtnEngine"   class="tabbtn" onclick="showTab('engine')">Engine</button>
+    <button id="tabBtnRegime" class="tabbtn" onclick="showTab('regime')">Regime</button>
+    <button id="tabBtnCompare" class="tabbtn" onclick="showTab('compare')">Compare</button>
+    <button id="tabBtnEngine" class="tabbtn" onclick="showTab('engine')">Engine</button>
   </nav>
 </header>
 
@@ -362,7 +431,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
 
       <div class="card" id="arenaPricePanel" style="display:none">
         <div class="price-head">
-          <h3 id="arenaPriceTitle">Price</h3>
+          <h2 id="arenaPriceTitle">Price</h2>
           <div class="seg" id="arenaPriceSeg">
             <button type="button" class="active" data-mode="candle" onclick="setArenaMode('candle')">Candles</button>
             <button type="button" data-mode="area" onclick="setArenaMode('area')">Area</button>
@@ -374,19 +443,19 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       </div>
 
       <div class="card" id="arenaChartPanel" style="display:none">
-        <h3>Equity — each fighter starts at $10,000</h3>
-        <div class="chart-box" style="height:320px"><canvas id="arenaChart"></canvas></div>
+        <h2>Equity — each fighter starts at $10,000</h2>
+        <div class="chart-box chart-lg"><canvas id="arenaChart"></canvas></div>
       </div>
 
       <div class="card" id="arenaBoardPanel" style="display:none">
-        <h3>Leaderboard</h3>
+        <h2>Leaderboard</h2>
         <table class="lb-table" id="leaderboard">
           <thead><tr>
             <th style="width:36px">#</th>
             <th>Fighter</th>
-            <th style="text-align:right">Return</th>
-            <th style="text-align:right">Equity</th>
-            <th style="text-align:right">Status</th>
+            <th class="ta-r">Return</th>
+            <th class="ta-r">Equity</th>
+            <th class="ta-r">Status</th>
             <th style="width:28px"></th>
           </tr></thead>
           <tbody></tbody>
@@ -397,15 +466,15 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <!-- Right: add fighter form -->
     <div class="arena-side">
       <div class="card">
-        <h3>Add a fighter</h3>
-        <div class="field" style="margin-bottom:12px">
+        <h2>Add a fighter</h2>
+        <div class="field mb-3">
           <label for="agentName">Name (max 24 chars)</label><input id="agentName" maxlength="24" placeholder="e.g. Crash Test">
         </div>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field mb-3">
           <span class="group-label" id="emojiLabel">Emoji</span>
           <div class="emoji-row" id="emojiRow" role="radiogroup" aria-labelledby="emojiLabel"></div>
         </div>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field mb-3">
           <label for="agentBuy">Buy rule — go long next day if…</label><input id="agentBuy" class="rule-input" placeholder="e.g. RSI(14) &lt; 30 AND CLOSE &gt; SMA(200)" spellcheck="false">
         </div>
         <div class="field" style="margin-bottom:4px">
@@ -464,8 +533,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
             <span class="ai-hint">— stored in this browser, sent to the provider via this server, never saved server-side</span>
           </label>
           <input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key">
-          <button type="button" class="ghost-sm" style="margin-top:6px;align-self:flex-start"
-                  onclick="aiForgetKey()">Forget key</button>
+          <button type="button" class="ghost-sm" style="margin-top:6px;align-self:flex-start" onclick="aiForgetKey()">Forget key</button>
         </div>
         <div class="field" style="margin-bottom:8px;display:none" id="aiBaseField">
           <label for="aiBaseUrl">Local server URL</label>
@@ -486,13 +554,13 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       </div>
       <div class="card">
         <p class="label">Backtest</p>
-        <div class="field" style="margin-bottom:12px"><label for="ticker">Ticker</label><input id="ticker" value="AAPL"></div>
-        <div class="field" style="margin-bottom:12px"><label for="start">Start</label><input id="start" type="date" value="2020-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label for="end">End</label><input id="end" type="date" value="2025-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label for="strategy">Strategy</label><select id="strategy"></select></div>
+        <div class="field mb-3"><label for="ticker">Ticker</label><input id="ticker" value="AAPL"></div>
+        <div class="field mb-3"><label for="start">Start</label><input id="start" type="date" value="2020-01-01"></div>
+        <div class="field mb-3"><label for="end">End</label><input id="end" type="date" value="2025-01-01"></div>
+        <div class="field mb-3"><label for="strategy">Strategy</label><select id="strategy"></select></div>
         <div id="paramFields" style="display:flex;flex-direction:column;gap:12px;"></div>
         <div id="customRules" style="display:none;margin-top:12px">
-          <div class="field" style="margin-bottom:12px">
+          <div class="field mb-3">
             <label for="labBuy">Buy rule</label><input id="labBuy" class="rule-input" placeholder="e.g. SMA(20) &gt; SMA(50)" spellcheck="false">
           </div>
           <div class="field">
@@ -502,7 +570,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
           <p id="labRuleStatus" class="rule-status"></p>
         </div>
         <p id="stratDesc" class="sub" style="margin:12px 0 0;font-size:12px;"></p>
-        <label class="feat-toggle" style="margin-top:12px" for="realFills">
+        <label class="feat-toggle mt-3" for="realFills">
           <input type="checkbox" id="realFills">
           <span>Realistic fills</span>
         </label>
@@ -522,7 +590,7 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       <dl class="metrics-grid" id="metricCards"></dl>
       <div class="card">
         <div class="price-head">
-          <h3 id="labPriceTitle">Price &amp; trades</h3>
+          <h2 id="labPriceTitle">Price &amp; trades</h2>
           <div style="display:flex;align-items:center;gap:14px">
             <div class="candle-legend">
               <span class="up">Up</span><span class="down">Down</span>
@@ -533,27 +601,27 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
             </div>
           </div>
         </div>
-        <div class="chart-box" style="height:280px"><canvas id="priceChart"></canvas></div>
+        <div class="chart-box chart-md"><canvas id="priceChart"></canvas></div>
         <div class="chart-box vol-box"><canvas id="volChart"></canvas></div>
         <div class="vol-label">Volume · ▲ buy ▼ sell</div>
       </div>
       <div class="card">
-        <h3>Equity curve — strategy vs. buy &amp; hold</h3>
-        <div class="chart-box" style="height:280px"><canvas id="equityChart"></canvas></div>
+        <h2>Equity curve — strategy vs. buy &amp; hold</h2>
+        <div class="chart-box chart-md"><canvas id="equityChart"></canvas></div>
       </div>
       <div class="card">
-        <h3>Drawdown (%)</h3>
-        <div class="chart-box" style="height:160px"><canvas id="ddChart"></canvas></div>
+        <h2>Drawdown (%)</h2>
+        <div class="chart-box chart-sm"><canvas id="ddChart"></canvas></div>
       </div>
       <div class="card">
-        <h3>Trades (most recent 50)</h3>
+        <h2>Trades (most recent 50)</h2>
         <div style="max-height:300px;overflow-y:auto;">
           <table><thead><tr><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>Return</th></tr></thead>
           <tbody id="tradeRows"></tbody></table>
         </div>
       </div>
       <div class="card" id="monthlyHeatmap" style="display:none">
-        <h3>Monthly returns heatmap</h3>
+        <h2>Monthly returns heatmap</h2>
         <div style="overflow-x:auto"><table class="cal-table" id="calTable"></table></div>
       </div>
     </div>
@@ -570,9 +638,9 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="sidebar">
       <div class="card">
         <p class="label">Settings</p>
-        <div class="field" style="margin-bottom:12px"><label for="anTicker">Ticker</label><input id="anTicker" value="AAPL"></div>
-        <div class="field" style="margin-bottom:12px"><label for="anStart">Start</label><input id="anStart" type="date" value="2020-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label for="anEnd">End</label><input id="anEnd" type="date" value="2025-01-01"></div>
+        <div class="field mb-3"><label for="anTicker">Ticker</label><input id="anTicker" value="AAPL"></div>
+        <div class="field mb-3"><label for="anStart">Start</label><input id="anStart" type="date" value="2020-01-01"></div>
+        <div class="field mb-3"><label for="anEnd">End</label><input id="anEnd" type="date" value="2025-01-01"></div>
         <div class="field"><label for="anStrategy">Strategy</label><select id="anStrategy"></select></div>
         <p id="anStratDesc" class="sub" style="margin:12px 0 0;font-size:12px;"></p>
       </div>
@@ -581,13 +649,13 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="main-col">
       <!-- Optimizer -->
       <div class="card">
-        <h3>Optimizer — parameter sweep</h3>
-        <p class="sub" style="margin-bottom:16px">Try every combination of two settings and rank by objective. Best cell = best in this date range only — not a guarantee going forward.</p>
-        <div class="controls" style="margin-bottom:16px">
-          <div class="field grid-field"><label id="optParam1Label">Param 1</label><input id="optParam1Values" class="values" placeholder="e.g. 5,10,15,20" style="width:160px"></div>
-          <div class="field grid-field"><label id="optParam2Label">Param 2</label><input id="optParam2Values" class="values" placeholder="e.g. 50,100,150,200" style="width:160px"></div>
+        <h2>Optimizer — parameter sweep</h2>
+        <p class="sub mb-4">Try every combination of two settings and rank by objective. Best cell = best in this date range only — not a guarantee going forward.</p>
+        <div class="controls mb-4">
+          <div class="field grid-field"><label id="optParam1Label">Param 1</label><input id="optParam1Values" class="values w-160" placeholder="e.g. 5,10,15,20" ></div>
+          <div class="field grid-field"><label id="optParam2Label">Param 2</label><input id="optParam2Values" class="values w-160" placeholder="e.g. 50,100,150,200" ></div>
           <div class="field">
-            <label for="optObjective">Objective</label><select id="optObjective" style="width:160px">
+            <label for="optObjective">Objective</label><select id="optObjective" class="w-160">
               <option value="sharpe">Sharpe ratio</option>
               <option value="sortino">Sortino ratio</option>
               <option value="calmar_ratio">Calmar ratio</option>
@@ -599,22 +667,22 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
         </div>
         <p id="optError" class="error"></p>
         <div id="optResults" style="display:none;margin-top:16px">
-          <p class="sub" style="margin-bottom:12px">Heatmap of <span id="optObjectiveLabel"></span> — outlined cell is best.</p>
+          <p class="sub mb-3" >Heatmap of <span id="optObjectiveLabel"></span> — outlined cell is best.</p>
           <div style="overflow-x:auto"><table class="heatmap-table" id="optHeatmap"></table></div>
-          <h3 style="margin-top:20px">Best combination</h3>
+          <h2 style="margin-top:20px">Best combination</h2>
           <dl class="metrics-grid" id="optBestCards"></dl>
         </div>
       </div>
 
       <!-- Walk-Forward -->
       <div class="card">
-        <h3>Walk-Forward optimization</h3>
+        <h2>Walk-Forward optimization</h2>
         <p class="note">Splits the range into chunks: tune on one, test on the next. The combined curve uses ONLY out-of-sample results — a much more honest preview of live performance.</p>
-        <div class="controls" style="margin-bottom:16px">
-          <div class="field grid-field"><label id="wfParam1Label">Param 1</label><input id="wfParam1Values" class="values" style="width:160px"></div>
-          <div class="field grid-field"><label id="wfParam2Label">Param 2</label><input id="wfParam2Values" class="values" style="width:160px"></div>
+        <div class="controls mb-4">
+          <div class="field grid-field"><label id="wfParam1Label">Param 1</label><input id="wfParam1Values" class="values w-160" ></div>
+          <div class="field grid-field"><label id="wfParam2Label">Param 2</label><input id="wfParam2Values" class="values w-160" ></div>
           <div class="field">
-            <label for="wfObjective">Objective</label><select id="wfObjective" style="width:160px">
+            <label for="wfObjective">Objective</label><select id="wfObjective" class="w-160">
               <option value="sharpe">Sharpe ratio</option>
               <option value="sortino">Sortino ratio</option>
               <option value="calmar_ratio">Calmar ratio</option>
@@ -628,9 +696,9 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
         <p id="wfError" class="error"></p>
         <div id="wfResults" style="display:none;margin-top:16px">
           <dl class="metrics-grid" id="wfMetricCards" style="margin-bottom:20px"></dl>
-          <h3>Out-of-sample equity vs. buy &amp; hold</h3>
-          <div class="chart-box" style="height:280px"><canvas id="wfChart"></canvas></div>
-          <h3 style="margin-top:20px">Per-fold detail</h3>
+          <h2>Out-of-sample equity vs. buy &amp; hold</h2>
+          <div class="chart-box chart-md"><canvas id="wfChart"></canvas></div>
+          <h2 style="margin-top:20px">Per-fold detail</h2>
           <div style="overflow-x:auto">
             <table><thead><tr><th>Fold</th><th>Train range</th><th>Test range</th><th>Best params</th><th>Train obj.</th><th>Test obj.</th></tr></thead>
             <tbody id="wfFoldRows"></tbody></table>
@@ -640,17 +708,17 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
 
       <!-- Monte Carlo -->
       <div class="card">
-        <h3>Monte Carlo simulation</h3>
+        <h2>Monte Carlo simulation</h2>
         <p class="note">Reshuffles the strategy's day-by-day returns thousands of times. NOT a forecast — it shows how much of the result might be luck vs. robust edge.</p>
-        <div class="controls" style="margin-bottom:16px">
+        <div class="controls mb-4">
           <div class="field"><label for="mcSims">Simulations</label><input id="mcSims" type="number" min="100" max="2000" value="500" style="width:100px"></div>
           <button id="mcBtn" onclick="runMonteCarlo()">Run Monte Carlo</button>
         </div>
         <p id="mcError" class="error"></p>
         <div id="mcResults" style="display:none;margin-top:16px">
           <dl class="metrics-grid" id="mcMetricCards" style="margin-bottom:20px"></dl>
-          <h3>Simulated equity — percentile bands (5/25/50/75/95)</h3>
-          <div class="chart-box" style="height:280px"><canvas id="mcChart"></canvas></div>
+          <h2>Simulated equity — percentile bands (5/25/50/75/95)</h2>
+          <div class="chart-box chart-md"><canvas id="mcChart"></canvas></div>
         </div>
       </div>
     </div>
@@ -667,17 +735,17 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="sidebar">
       <div class="card">
         <p class="label">Regime detector</p>
-        <div class="field" style="margin-bottom:12px"><label for="regTicker">Ticker</label><input id="regTicker" value="SPY"></div>
-        <div class="field" style="margin-bottom:12px"><label for="regStart">Start</label><input id="regStart" type="date"></div>
-        <div class="field" style="margin-bottom:12px"><label for="regEnd">End</label><input id="regEnd" type="date"></div>
+        <div class="field mb-3"><label for="regTicker">Ticker</label><input id="regTicker" value="SPY"></div>
+        <div class="field mb-3"><label for="regStart">Start</label><input id="regStart" type="date"></div>
+        <div class="field mb-3"><label for="regEnd">End</label><input id="regEnd" type="date"></div>
         <p id="regError" class="error"></p>
-        <button id="regRunBtn" onclick="runRegime()" style="width:100%">Detect regimes</button>
+        <button id="regRunBtn" onclick="runRegime()" class="w-full">Detect regimes</button>
       </div>
       <div class="card" id="regAttribCard" style="display:none">
         <p class="label">Strategy attribution</p>
-        <div class="field" style="margin-bottom:12px"><label for="regAttribStrategy">Strategy</label><select id="regAttribStrategy"></select></div>
+        <div class="field mb-3"><label for="regAttribStrategy">Strategy</label><select id="regAttribStrategy"></select></div>
         <p id="regAttribError" class="error"></p>
-        <button id="regAttribBtn" onclick="runRegimeAttrib()" style="width:100%">Run attribution</button>
+        <button id="regAttribBtn" onclick="runRegimeAttrib()" class="w-full">Run attribution</button>
       </div>
     </div>
 
@@ -688,8 +756,8 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="main-col" id="regResults" style="display:none">
 
       <div class="card">
-        <h3>Price with regime overlay</h3>
-        <div class="chart-box" style="height:280px"><canvas id="regimeChart"></canvas></div>
+        <h2>Price with regime overlay</h2>
+        <div class="chart-box chart-md"><canvas id="regimeChart"></canvas></div>
         <div class="regime-strip-wrap" title="Each day colored by regime"><canvas id="regimeStrip"></canvas></div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)">
           <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:var(--accent);border-radius:2px;display:inline-block;opacity:.8"></span>Trending</span>
@@ -702,34 +770,34 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
       <div id="regCountCards"></div>
 
       <div class="card">
-        <h3>Latest regime</h3>
+        <h2>Latest regime</h2>
         <div id="regLatest"></div>
       </div>
 
       <div class="card">
-        <h3>Feature deep-dive — rolling indicators over time</h3>
+        <h2>Feature deep-dive — rolling indicators over time</h2>
         <p class="sub" style="margin-bottom:16px;font-size:12px">Five signals normalized to [0,1] so all fit one chart. Hover for values.</p>
         <div class="feat-legend" id="featLegend"></div>
         <div class="chart-box" style="height:260px"><canvas id="regFeatChart"></canvas></div>
       </div>
 
       <div class="card" id="regAttribPanel" style="display:none">
-        <h3>Strategy performance by regime</h3>
+        <h2>Strategy performance by regime</h2>
         <div id="regAttribRows"></div>
       </div>
 
       <hr class="regime-separator">
 
       <div class="card">
-        <h3>Regime-gated backtest</h3>
+        <h2>Regime-gated backtest</h2>
         <p class="note">Only trade when the market is in a specific regime — fewer trades but potentially better odds on each.</p>
-        <div class="controls" style="margin-bottom:16px">
+        <div class="controls mb-4">
           <div class="field"><label for="regBtTicker">Ticker</label><input id="regBtTicker" style="width:90px"></div>
           <div class="field"><label for="regBtStart">Start</label><input id="regBtStart" type="date" style="width:140px"></div>
           <div class="field"><label for="regBtEnd">End</label><input id="regBtEnd" type="date" style="width:140px"></div>
-          <div class="field"><label for="regBtStrategy">Strategy</label><select id="regBtStrategy" style="width:160px"></select></div>
+          <div class="field"><label for="regBtStrategy">Strategy</label><select id="regBtStrategy" class="w-160"></select></div>
           <div class="field">
-            <label for="regBtFilter">Trade only when</label><select id="regBtFilter" style="width:160px">
+            <label for="regBtFilter">Trade only when</label><select id="regBtFilter" class="w-160">
               <option value="TRENDING">Trending</option>
               <option value="MEAN_REVERTING">Mean-Reverting</option>
               <option value="HIGH_VOLATILITY">High Volatility</option>
@@ -742,8 +810,8 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
         <div id="regGatedResults">
           <div class="regime-interp" id="regBtInterp"></div>
           <dl class="metrics-grid" id="regBtMetricCards" style="margin-bottom:20px"></dl>
-          <h3>Equity — gated strategy vs. buy &amp; hold</h3>
-          <div class="chart-box" style="height:280px"><canvas id="regBtChart"></canvas></div>
+          <h2>Equity — gated strategy vs. buy &amp; hold</h2>
+          <div class="chart-box chart-md"><canvas id="regBtChart"></canvas></div>
         </div>
       </div>
 
@@ -760,14 +828,14 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     <div class="sidebar">
       <div class="card">
         <p class="label">Compare strategies</p>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field mb-3">
           <label for="cmpTickers">Tickers (comma-separated)</label><textarea id="cmpTickers" rows="2" placeholder="AAPL, MSFT, SPY, QQQ" style="height:56px"></textarea>
         </div>
-        <div class="field" style="margin-bottom:12px"><label for="cmpStart">Start</label><input id="cmpStart" type="date" value="2020-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label for="cmpEnd">End</label><input id="cmpEnd" type="date" value="2025-01-01"></div>
-        <div class="field" style="margin-bottom:12px"><label for="cmpStrategy">Strategy</label><select id="cmpStrategy"></select></div>
+        <div class="field mb-3"><label for="cmpStart">Start</label><input id="cmpStart" type="date" value="2020-01-01"></div>
+        <div class="field mb-3"><label for="cmpEnd">End</label><input id="cmpEnd" type="date" value="2025-01-01"></div>
+        <div class="field mb-3"><label for="cmpStrategy">Strategy</label><select id="cmpStrategy"></select></div>
         <p id="cmpError" class="error"></p>
-        <button id="cmpRunBtn" onclick="runCompare()" style="width:100%">Run comparison</button>
+        <button id="cmpRunBtn" onclick="runCompare()" class="w-full">Run comparison</button>
       </div>
     </div>
 
@@ -777,15 +845,15 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
 
     <div class="main-col" id="cmpResults" style="display:none">
       <div class="card">
-        <h3>Equity curves</h3>
-        <div class="chart-box" style="height:280px"><canvas id="cmpChart"></canvas></div>
+        <h2>Equity curves</h2>
+        <div class="chart-box chart-md"><canvas id="cmpChart"></canvas></div>
       </div>
       <div class="card">
-        <h3>Summary metrics</h3>
+        <h2>Summary metrics</h2>
         <div id="cmpTable"></div>
       </div>
       <div class="card" id="cmpCorrCard" style="display:none">
-        <h3>Return correlation</h3>
+        <h2>Return correlation</h2>
         <p class="corr-note">How closely each pair moves day-to-day. +1.00 = lockstep, 0 = unrelated, −1.00 = opposite. Lower correlations diversify risk.</p>
         <div style="overflow-x:auto"><table class="heatmap-table" id="cmpCorrTable"></table></div>
       </div>
@@ -798,34 +866,54 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
      TAB 6 — ENGINE (matching engine: simulated market + research agent)
      =================================================================== -->
 <div id="tabEngine" class="tab-panel">
-  <div class="main-col" style="padding:24px 0">
+  <div class="tab-body">
+
+    <div class="sidebar">
+      <div class="card">
+        <p class="label">Simulated market</p>
+        <div class="field mb-3"><label for="simSteps">Steps</label>
+          <input id="simSteps" type="number" value="400" min="50" max="2000"></div>
+        <div class="field mb-3"><label for="simSeed">Seed</label>
+          <input id="simSeed" type="number" value="7"></div>
+        <button id="simBtn" class="w-full" onclick="runSim()">Run market</button>
+        <p id="simErr" class="error"></p>
+      </div>
+      <div class="card">
+        <p class="label">Research agent</p>
+        <div class="field mb-3"><label for="agTicker">Ticker</label>
+          <input id="agTicker" value="AAPL"></div>
+        <div class="field mb-3"><label for="agBudget">Trials</label>
+          <input id="agBudget" type="number" value="40" min="5" max="200"></div>
+        <button id="agBtn" class="w-full" onclick="runAgent()">Run search</button>
+        <p id="agErr" class="error"></p>
+      </div>
+    </div>
+
+    <div class="main-col" id="enginePlaceholder" style="color:var(--muted);padding-top:var(--s-5);font-size:var(--t-base);">
+      Run the <b style="color:var(--text)">simulated market</b> to watch a price emerge from
+      order flow, or turn the <b style="color:var(--text)">research agent</b> loose on a ticker.
+    </div>
+
+    <div class="main-col" id="engineResults" style="display:none">
 
     <div class="card">
-      <h3>Simulated market — price is produced, not downloaded</h3>
-      <p class="sub" style="margin-bottom:16px">
+      <h2>Simulated market — price is produced, not downloaded</h2>
+      <p class="sub mb-4">
         Trading bots post real orders into the matching engine and trade against each other.
         Nobody supplies a price: the candles below are what they actually traded at.
         Market makers quote both sides and skew to shed inventory, momentum bots chase moves,
         mean-reverters fade them, noise traders add uninformed flow.
       </p>
-      <div class="controls" style="margin-bottom:16px">
-        <div class="field w-110"><label for="simSteps">Steps</label>
-          <input id="simSteps" type="number" value="400" min="50" max="2000"></div>
-        <div class="field w-110"><label for="simSeed">Seed</label>
-          <input id="simSeed" type="number" value="7"></div>
-        <button id="simBtn" onclick="runSim()">Run market</button>
-      </div>
-      <p id="simErr" class="error"></p>
       <div id="simOut" style="display:none">
-        <div class="chart-box" style="height:280px"><canvas id="simChart"></canvas></div>
+        <div class="chart-box chart-md"><canvas id="simChart"></canvas></div>
         <div class="chart-box vol-box"><canvas id="simVol"></canvas></div>
         <div class="vol-label">Volume · trades per step</div>
-        <div style="margin-top:20px">
+        <div class="mt-4">
           <table class="lb-table" id="simAgents">
             <thead><tr>
               <th>Agent</th><th>Type</th>
-              <th style="text-align:right">Position</th>
-              <th style="text-align:right">P&amp;L</th>
+              <th class="ta-r">Position</th>
+              <th class="ta-r">P&amp;L</th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -837,28 +925,21 @@ h3{font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-tra
     </div>
 
     <div class="card">
-      <h3>Research agent — searches, then discounts itself</h3>
-      <p class="sub" style="margin-bottom:16px">
+      <h2>Research agent — searches, then discounts itself</h2>
+      <p class="sub mb-4">
         The agent proposes strategies, backtests them, and refines. The interesting part is
         the critic: search enough variations and one will look brilliant by pure luck, so
         every result is measured against what luck alone would produce after that many trials.
         A verdict of <b style="color:var(--text)">not supported</b> is the normal, honest outcome.
       </p>
-      <div class="controls" style="margin-bottom:16px">
-        <div class="field w-110"><label for="agTicker">Ticker</label>
-          <input id="agTicker" value="AAPL"></div>
-        <div class="field w-110"><label for="agBudget">Trials</label>
-          <input id="agBudget" type="number" value="40" min="5" max="200"></div>
-        <button id="agBtn" onclick="runAgent()">Run search</button>
-      </div>
-      <p id="agErr" class="error"></p>
       <div id="agOut" style="display:none">
         <dl class="metrics-grid" id="agMetrics"></dl>
-        <div id="agVerdict" class="note" style="margin-top:16px"></div>
+        <div id="agVerdict" class="note mt-4"></div>
       </div>
-    </div>
+    </div><!-- /card -->
 
-  </div>
+    </div><!-- /#engineResults -->
+  </div><!-- /.tab-body -->
 </div><!-- end #tabEngine -->
 
 </div><!-- .page -->
@@ -1348,7 +1429,7 @@ function renderLeaderboard(agents) {
     '<td style="text-align:right;color:' + (a.return_pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
       (a.return_pct >= 0 ? '+' : '') + Number(a.return_pct).toFixed(2) + '%</td>' +
     '<td style="text-align:right;font-family:\'JetBrains Mono\',monospace">$' + Number(a.equity).toFixed(2) + '</td>' +
-    '<td style="text-align:right"><span class="pos-badge ' + (a.position === 'LONG' ? 'pos-long' : 'pos-cash') + '">' + a.position + '</span></td>' +
+    '<td class="ta-r"><span class="pos-badge ' + (a.position === 'LONG' ? 'pos-long' : 'pos-cash') + '">' + a.position + '</span></td>' +
     '<td>' + (a.is_default ? '' :
       '<button class="ghost-sm" aria-label="Remove ' + escHtml(a.name) + '"' +
       ' onclick="deleteAgent(\'' + escHtml(a.id) + '\')">×</button>') + '</td>' +
@@ -1922,7 +2003,7 @@ function renderOptimize(r) {
   const m = r.best.metrics;
   const paramsLabel = Object.entries(r.best.params).map(([k,v]) => k + '=' + v).join(', ');
   document.getElementById('optBestCards').innerHTML = [
-    makeMCard('Best params',   paramsLabel, ''),
+    makeMCard('Best params',   paramsLabel, 'text'),
     makeMCard(r.objective,     Number(m[objKey]).toFixed(2), ''),
     makeMCard('Total return',  m.total_return_pct  + '%', m.total_return_pct  >= 0 ? 'pos' : 'neg'),
     makeMCard('CAGR',          m.cagr_pct          + '%/yr', m.cagr_pct          >= 0 ? 'pos' : 'neg'),
@@ -2184,7 +2265,7 @@ function renderRegimeLatest(r) {
   const ORDER  = ['TRENDING','MEAN_REVERTING','HIGH_VOLATILITY','CHOPPY'];
   let html = '<div class="regime-label ' + regime + '">' + REGIME_NAMES[regime] + '</div>';
   html += '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">' + lat.date + '</div>';
-  html += '<div style="margin-bottom:16px">';
+  html += '<div class="mb-4">';
   ORDER.forEach(rn => {
     const pct = ((scores[rn] || 0) * 100).toFixed(1);
     html += '<div class="prob-row">' +
@@ -2428,9 +2509,9 @@ function renderCompare(r) {
 
   document.getElementById('cmpTable').innerHTML =
     '<table class="lb-table"><thead><tr>' +
-    '<th>Ticker</th><th style="text-align:right">Return</th>' +
-    '<th style="text-align:right">CAGR</th><th style="text-align:right">Sharpe</th>' +
-    '<th style="text-align:right">Max DD</th><th style="text-align:right">Win Rate</th>' +
+    '<th>Ticker</th><th class="ta-r">Return</th>' +
+    '<th class="ta-r">CAGR</th><th class="ta-r">Sharpe</th>' +
+    '<th class="ta-r">Max DD</th><th class="ta-r">Win Rate</th>' +
     '</tr></thead><tbody>' +
     ok.map((item, i) => {
       const m = item.metrics;
@@ -2439,10 +2520,10 @@ function renderCompare(r) {
           ';border-radius:50%;margin-right:6px"></span>' + escHtml(item.ticker) + '</td>' +
         '<td style="text-align:right;color:' + (m.total_return_pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
           (m.total_return_pct >= 0 ? '+' : '') + Number(m.total_return_pct).toFixed(2) + '%</td>' +
-        '<td style="text-align:right">'  + Number(m.cagr_pct).toFixed(2)          + '%</td>' +
-        '<td style="text-align:right">'  + Number(m.sharpe).toFixed(2)             + '</td>' +
+        '<td class="ta-r">'  + Number(m.cagr_pct).toFixed(2)          + '%</td>' +
+        '<td class="ta-r">'  + Number(m.sharpe).toFixed(2)             + '</td>' +
         '<td style="text-align:right;color:var(--red)">' + Number(m.max_drawdown_pct).toFixed(2) + '%</td>' +
-        '<td style="text-align:right">'  + Number(m.win_rate_pct).toFixed(1)       + '%</td>' +
+        '<td class="ta-r">'  + Number(m.win_rate_pct).toFixed(1)       + '%</td>' +
         '</tr>';
     }).join('') + '</tbody></table>';
 
@@ -2505,6 +2586,11 @@ function renderCorrHeatmap(items) {
 let simChart = null, simVol = null;
 
 async function runSim() {
+  // Reveal the results column and retire the empty state (same pattern as the
+  // Lab tab's render()), otherwise the new sidebar layout leaves it hidden.
+  document.getElementById('engineResults').style.display = 'flex';
+  document.getElementById('enginePlaceholder').style.display = 'none';
+
   const btn = document.getElementById('simBtn'), err = document.getElementById('simErr');
   err.style.display = 'none';
   document.getElementById('simOut').style.display = 'none';  // don't leave stale results above an error
@@ -2545,6 +2631,11 @@ async function runSim() {
 }
 
 async function runAgent() {
+  // Reveal the results column and retire the empty state (same pattern as the
+  // Lab tab's render()), otherwise the new sidebar layout leaves it hidden.
+  document.getElementById('engineResults').style.display = 'flex';
+  document.getElementById('enginePlaceholder').style.display = 'none';
+
   const btn = document.getElementById('agBtn'), err = document.getElementById('agErr');
   err.style.display = 'none';
   document.getElementById('agOut').style.display = 'none';
@@ -2577,7 +2668,7 @@ async function runAgent() {
     const o = d.out_of_sample, c = d.critic;
     document.getElementById('agOut').style.display = 'block';
     document.getElementById('agMetrics').innerHTML = [
-      makeMCard('Strategy', escHtml(d.strategy), ''),
+      makeMCard('Strategy', escHtml(d.strategy), 'text'),
       makeMCard('Trials', d.trials, ''),
       makeMCard('Out-of-sample return', o.return_pct + '%', o.return_pct >= 0 ? 'pos' : 'neg'),
       makeMCard('Out-of-sample Sharpe', o.sharpe, o.sharpe >= 1 ? 'pos' : 'neg'),

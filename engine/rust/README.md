@@ -2,7 +2,7 @@
 
 A port of `../orderbook.py`. Same semantics, different data structures, verified by comparing event logs rather than by trusting that they match.
 
-Standard library only. No dependencies to resolve, and no part of the benchmark is attributable to someone else's code.
+Standard library only by default. No dependencies to compile, and no part of the benchmark is attributable to someone else's code. The Python binding (pyo3) is an optional cargo feature, `python`, that only maturin turns on; criterion lives in a separate crate, `bench/`.
 
 ## Build and run
 
@@ -23,6 +23,34 @@ python diff_test.py check ops.txt 20000
 ```
 
 Both engines assign order ids sequentially, so identical input produces identical ids and the logs compare directly. Generating a stream separately in each language would not work: two RNGs never agree.
+
+## Use it from Python (PyO3)
+
+The same engine builds as a Python module, `bullpen_engine`, exposing the portable book interface from SPEC.md section 7.1. `engine/fastbook.py` then hands out the Rust `Book` automatically, falling back to the Python one when the module is not installed (or when `BULLPEN_ENGINE=python` is set).
+
+From `engine/rust`, inside the virtualenv the app uses:
+
+```
+pip install maturin
+maturin develop --release
+python ../test_pyo3.py
+python ../fastbook.py
+```
+
+`maturin develop` compiles with `--features python` and installs the module into the active environment. `test_pyo3.py` drives 20,000 random ops through both engines and compares every event tuple; it skips (exit 0) if the module is not built. The wheel uses Python's stable ABI (`abi3`), so one build works on CPython 3.9 and newer.
+
+Do not run `cargo test --features python`: the `extension-module` setting deliberately leaves libpython unlinked, so a test binary cannot link. Plain `cargo test` is unaffected.
+
+On Windows PowerShell, run the commands one per line (or join them with `;`). Do not use `&&`; Windows PowerShell 5 rejects it.
+
+## Criterion benchmarks
+
+```
+cd bench
+cargo bench
+```
+
+See `bench/README.md` for what each benchmark measures. Criterion gives a confidence interval for the mean and flags regressions between runs; `cargo run --release -- bench` above is still the tool for tail latency.
 
 ## What differs from the Python version, and why
 

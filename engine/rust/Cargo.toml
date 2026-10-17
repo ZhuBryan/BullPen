@@ -2,15 +2,43 @@
 name = "bullpen_engine"
 version = "0.1.0"
 edition = "2021"
+# The criterion benchmarks live in their own crate (bench/) so criterion never
+# enters this crate's build. There is no [workspace]: bench/ is an independent
+# crate that points back here with a path dependency. `exclude` only keeps it
+# out of `cargo package`.
+exclude = ["bench"]
 
-# No dependencies on purpose. The benchmark harness and the tests are written
-# against std only, so `cargo build` cannot fail on a crate that will not
-# resolve, and the numbers are not attributable to somebody else's code.
+# The engine itself depends on std only. The benchmark harness and the tests
+# are written against std, so the numbers are not attributable to somebody
+# else's code.
+#
+# The one exception is pyo3, and it is OPTIONAL: it is only compiled when the
+# `python` feature is on, which maturin does when building the Python extension
+# (see pyproject.toml). Plain `cargo build` / `cargo test` never compile it.
+# Honest caveat: Cargo.lock records optional dependencies too, so the first
+# `cargo build` after this change needs network once to resolve pyo3 into the
+# lockfile, even though pyo3 is not compiled.
+#
+# pyo3 features:
+#   abi3-py39: build against Python's stable ABI, so one compiled module works
+#     on every CPython from 3.9 up instead of one build per Python version.
+#   extension-module: do not link libpython; the interpreter that imports the
+#     module already provides it. Side effect: `cargo test --features python`
+#     cannot link, so test the binding from Python (../test_pyo3.py) instead.
 [dependencies]
+pyo3 = { version = "=0.22.6", optional = true, features = ["extension-module", "abi3-py39"] }
+
+[features]
+python = ["dep:pyo3"]
 
 [lib]
 name = "bullpen_engine"
 path = "src/lib.rs"
+# No `crate-type = ["cdylib"]` here on purpose. maturin (>= 1.0) builds the
+# Python extension with `cargo rustc --crate-type cdylib` on its own when the
+# lib is a plain rlib. Declaring cdylib here would (a) build a DLL on every
+# `cargo build`/`cargo test`, and (b) on Windows collide with the binary of the
+# same name: both would write target/*/bullpen_engine.pdb.
 
 [[bin]]
 name = "bullpen_engine"

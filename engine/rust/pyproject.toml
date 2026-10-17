@@ -1,0 +1,21 @@
+# Builds the Rust engine as a Python extension module with maturin.
+#   pip install maturin
+#   maturin develop --release      (installs into the active virtualenv)
+# Then `import bullpen_engine` works and engine/fastbook.py picks it up.
+
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "bullpen_engine"
+version = "0.1.0"
+description = "Bullpen's limit order book matching engine (Rust, via PyO3)"
+requires-python = ">=3.9"
+
+[tool.maturin]
+module-name = "bullpen_engine"
+bindings = "pyo3"
+# The PyO3 code is behind a cargo feature so the plain Rust build stays
+# dependency-free; maturin switches it on.
+features = ["python"]

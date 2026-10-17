@@ -1,0 +1,33 @@
+[package]
+name = "bullpen_engine_bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A separate crate so criterion (and its dependency tree) never touches the
+# engine's own build: `cargo test` in engine/rust stays std-only. This crate
+# only exists to be benchmarked:  cargo bench   (from this directory)
+
+# An empty [workspace] makes this crate its own workspace root, so cargo never
+# tries to attach it to a workspace in a parent directory.
+[workspace]
+
+[dependencies]
+bullpen_engine = { path = ".." }
+
+[dev-dependencies]
+# rayon and plotters are off: they only draw charts, and every dependency is
+# one more thing that can fail to build. Numbers still print to the terminal.
+criterion = { version = "=0.5.1", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "book"
+harness = false   # criterion supplies its own main()
+
+# Profiles of a path dependency are ignored, so restate the engine's release
+# settings here; otherwise the benchmark would measure a less-optimised build.
+# (`cargo bench` uses the bench profile, which inherits from release.)
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

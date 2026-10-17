@@ -31,6 +31,11 @@ use std::time::Instant;
 
 pub mod spsc;
 
+// Python bindings (PyO3). Only compiled with `--features python`, so the
+// default build and `cargo test` stay std-only. See src/py.rs.
+#[cfg(feature = "python")]
+pub mod py;
+
 pub type Price = i64;
 pub type Qty = i64;
 pub type OrderId = u64;
@@ -225,6 +230,49 @@ impl Book {
 
     pub fn best_ask(&self) -> Option<Price> {
         self.asks.levels.keys().next().copied()
+    }
+
+    /// Up to `levels` price levels on one side, best first, as (price, live qty).
+    /// Live qty skips cancelled husks, so it is what a trader could actually hit.
+    pub fn depth(&self, side: Side, levels: usize) -> Vec<(Price, Qty)> {
+        match side {
+            Side::Buy => self
+                .bids
+                .levels
+                .iter()
+                .rev()
+                .take(levels)
+                .map(|(&p, q)| (p, self.live_qty(q)))
+                .collect(),
+            Side::Sell => self
+                .asks
+                .levels
+                .iter()
+                .take(levels)
+                .map(|(&p, q)| (p, self.live_qty(q)))
+                .collect(),
+        }
+    }
+
+    fn live_qty(&self, q: &VecDeque<usize>) -> Qty {
+        q.iter()
+            .filter(|&&slot| !self.slab[slot].cancelled)
+            .map(|&slot| self.slab[slot].remaining)
+            .sum()
+    }
+
+    /// True while the order is resting and live (not filled, not cancelled).
+    pub fn has_order(&self, id: OrderId) -> bool {
+        self.index.contains_key(&id)
+    }
+
+    /// Ids of all resting live orders, ascending. Ids are issued in arrival
+    /// order and an order rests at most once, so ascending id is also the order
+    /// Python's insertion-ordered dict yields them in.
+    pub fn order_ids(&self) -> Vec<OrderId> {
+        let mut ids: Vec<OrderId> = self.index.keys().copied().collect();
+        ids.sort_unstable();
+        ids
     }
 
     fn side_mut(&mut self, side: Side) -> &mut BookSide {
@@ -581,6 +629,21 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].3, alive, "filled a cancelled order");
         b.check();
+    }
+
+    #[test]
+    fn portable_accessors() {
+        let mut b = Book::new();
+        let a = b.limit(Side::Buy, 99, 5);
+        let c = b.limit(Side::Buy, 99, 7);
+        b.limit(Side::Buy, 98, 1);
+        b.limit(Side::Sell, 101, 2);
+        b.cancel(a);
+        assert_eq!(b.depth(Side::Buy, 5), vec![(99, 7), (98, 1)]);
+        assert_eq!(b.depth(Side::Buy, 1), vec![(99, 7)]);
+        assert_eq!(b.depth(Side::Sell, 5), vec![(101, 2)]);
+        assert!(!b.has_order(a) && b.has_order(c));
+        assert_eq!(b.order_ids(), vec![2, 3, 4]);
     }
 
     /// Deterministic LCG so the sequence does not depend on a crate.

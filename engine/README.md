@@ -2,12 +2,17 @@
 
 A limit order book exchange simulator and microstructure research framework, built from scratch.
 
-Four pieces, each usable on its own:
+The pieces, each usable on its own:
 
-1. **Matching engine** with correct price-time priority
-2. **Live capture** of real exchange order book data
-3. **Replay and fill simulation** that models queue position instead of pretending you fill at mid
-4. **Research pipeline** with purged walk-forward validation
+1. **Matching engine** with correct price-time priority, in Python and Rust
+2. **FIX 4.4 order entry** and an OMS with cancel/replace and average-cost PnL
+3. **Pre-trade risk**: size, price collars, position limits, self-trade prevention
+4. **Instrument reference data** and multi-symbol routing (Reg NMS tick regimes)
+5. **Live capture** of real exchange order book data
+6. **Replay and fill simulation** that models queue position instead of pretending you fill at mid
+7. **Execution algorithms** (TWAP, VWAP, POV) with implementation-shortfall TCA
+8. **Research pipeline** with purged walk-forward validation
+9. **Metrics**: latency histograms and counters, Prometheus exposition
 
 The Python side is standard library plus numpy; the Rust port is standard library only. No API keys, no paid data, no framework.
 
@@ -78,6 +83,40 @@ cargo run --release -- pipeline ../ops.txt
 
 That mode runs the same op stream through the queue and through a `Mutex<VecDeque>` baseline, asserts both produced identical event counts, and prints the ratio. Comparing against a mutex on identical work is the honest way to show whether lock-free earns its complexity.
 
+## Order entry, FIX and the OMS
+
+`fix.py` speaks FIX 4.4, the protocol equity and futures order entry actually
+runs on. BodyLength and a zero-padded CheckSum are both computed correctly and
+pinned by tests, including rejection of tampered messages, and the order state
+machine makes illegal transitions raise rather than letting a venue fill an
+order the client already cancelled.
+
+`oms.py` is the client-facing layer: ClOrdIDs, cancel and cancel/replace
+addressed by OrigClOrdID, execution reports as the source of truth, and
+average-cost position accounting. Two details that are easy to get wrong and
+are tested here:
+
+- **Replace loses queue priority.** Amending is a cancel plus a new order, and
+  the replacement goes to the back of the queue at its price. A test asserts a
+  later order fills first after a replace.
+- **A position flipping through zero** closes the old side and opens the
+  remainder at the fill price. Blending them into one average misstates both
+  realized and unrealized PnL.
+
+## Execution algorithms and TCA
+
+`execution.py` has TWAP, VWAP (largest-remainder allocation, so slices conserve
+shares) and POV. `backend/exec_sim.py` works a parent order through the live
+simulated book, so child orders pay the spread and move the market rather than
+filling at an assumed price.
+
+Scoring is implementation shortfall against the arrival price, decomposed into
+the cost of what traded and the opportunity cost of what did not. That second
+term is the point: an algorithm that quietly fills 60% and reports a beautiful
+average price has hidden its largest cost. The sign convention is pinned both
+ways in tests: positive always means worse for the trader, whether buying or
+selling.
+
 ## Pre-trade risk
 
 `risk.py` is the gate in front of the engine, which is where venues put it: risk rules change per account and often, matching logic must not. Five checks, all with recorded reject codes for audit:
@@ -124,8 +163,10 @@ Being explicit, since a half-built project described honestly is worth more than
 - **No C++.** Rust covers the systems ground, but most quant job specs ask for C++. The differential harness would validate a third port for free.
 - **The matching engine itself is still single-threaded.** The lock-free queue and the two-thread pipeline exist and are tested, but the deterministic single-threaded path is what the differential test runs against, and that is deliberate: the oracle has to stay reproducible.
 - **Gradient-boosted trees.** Only logistic regression is implemented, deliberately, as a baseline. Trees need sklearn or lightgbm.
+- **No FIX session layer.** `fix.py` is the wire format and the business
+  messages, not logon, sequence-number recovery, resend requests or heartbeats.
+  Those are a separate problem and a less interesting one.
 - **Parquet storage.** Capture writes gzipped JSONL. Columnar storage earns its place at analysis scale, not at capture time.
-- **Multi-symbol support.** One book, one symbol.
 - **A capture run against *real* Binance traffic.** The live socket path is now tested end to end, but against a local fake feed (`test_capture_live.py`), not the real exchange. That test stands up an actual websocket server and HTTP snapshot endpoint on localhost, scripts a deliberate sequence gap, and asserts the gap is caught, a resync snapshot follows, the trade stream is routed, a dropped socket is survived, and the gzip file round-trips. It found a real bug on first run: a closed socket raised an unhandled `ConnectionClosedOK` and killed the recorder, so `record()` now reconnects with exponential backoff and re-snapshots on every reconnect (mandatory, since the book moved while the socket was down). What remains untested is the real feed's quirks: rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
 
 ## An honest note on results
@@ -142,6 +183,11 @@ capture.py     Binance L2 capture, snapshot/diff resequencing, gap detection
 replay.py      book reconstruction, queue-position fills, microstructure features
 research.py    labels, purged walk-forward CV, baseline model, cost-aware metrics
 risk.py        pre-trade checks: size, value, price collar, position, self-trade
+fix.py         FIX 4.4 encode/decode, builders, order state machine
+oms.py         order lifecycle, cancel/replace, average-cost positions and PnL
+execution.py   TWAP/VWAP/POV scheduling and transaction cost analysis
+instruments.py tick regimes, lot rules, multi-symbol Venue
+metrics.py     latency histograms, counters, Prometheus text
 bench.py       throughput and tail latency harness
 diff_test.py   proves the Rust engine matches this one, event for event
 test.py        runs every self-check

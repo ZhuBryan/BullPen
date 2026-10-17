@@ -2,7 +2,9 @@
 
 Two halves. A limit order book exchange built from scratch, and a research platform that uses it.
 
-**The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to Rust. The two are differential-tested: fed identical order streams, they produce byte-identical event logs, and the Rust version runs **12.7x faster (3.4M orders/sec) with 13x lower p99.9 latency**. On top of it sit live Binance L2 capture with sequence-gap detection, a replay harness that models queue position instead of assuming fills at mid, and a research pipeline with purged walk-forward validation.
+**The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to Rust. The two are differential-tested: fed identical order streams, they produce byte-identical event logs, and the Rust version runs **12.7x faster (3.4M orders/sec) with 13x lower p99.9 latency**.
+
+Around it sits the rest of a trading stack: **FIX 4.4 order entry** and an OMS with cancel/replace and average-cost PnL, **pre-trade risk** (price collars, position limits, self-trade prevention), **instrument reference data** with Reg NMS tick regimes and multi-symbol routing, a **lock-free SPSC queue** for the feed-to-matcher handoff, **live Binance L2 capture** with sequence-gap detection and resync, **execution algorithms** (TWAP, VWAP, POV) scored by implementation shortfall, a **research pipeline** with purged walk-forward validation, and **latency histograms** exposed as Prometheus text.
 
 **The platform** is a paper-trading arena and backtester: write trading rules in plain English or a small safe DSL, race strategies against each other, and stress-test them with a parameter optimizer, walk-forward validation, Monte Carlo, and a market-regime detector.
 

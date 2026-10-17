@@ -205,6 +205,25 @@ button:focus-visible{outline:2px solid var(--accentH);outline-offset:1px;}
 .metric dd.pos{color:var(--green);}
 .metric dd.neg{color:var(--red);}
 
+/* ---- Glossary help ----
+   Terms with a definition get a dotted underline, the long-standing web
+   convention for "hover me for meaning" (it is how <abbr> renders). The
+   tooltip itself is one floating element positioned by JS, so it is never
+   clipped by a scrolling table or a card edge and always stays on screen. */
+.has-help{text-decoration:underline dotted var(--faint);text-underline-offset:3px;cursor:help;}
+.has-help:hover,.has-help:focus-visible{text-decoration-color:var(--muted);}
+.has-help:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+#tip{position:fixed;z-index:200;max-width:260px;padding:7px 9px;background:var(--surface3);
+  border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);
+  font:400 var(--t-xs)/1.5 Inter,system-ui,sans-serif;letter-spacing:0;text-transform:none;
+  pointer-events:none;opacity:0;transition:opacity .1s;box-shadow:var(--shadow-lg);}
+#tip.on{opacity:1;}
+#tip b{font-weight:600;color:var(--text);}
+/* Live description under a dropdown: changes as you pick, so the meaning is
+   in view at the moment of choosing rather than one hover away. */
+.hint{font-size:var(--t-xs);color:var(--muted);line-height:1.5;margin-top:4px;max-width:340px;}
+.hint:empty{display:none;}
+
 /* ---- Utility ---- */
 .pos{color:var(--green);}
 .neg{color:var(--red);}
@@ -1136,6 +1155,151 @@ const sgnCls = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
 function makeMCard(name, val, cls) {
   return '<div class="metric"><dt>' + name + '</dt><dd class="' + (cls || '') + '">' + val + '</dd></div>';
 }
+
+/* =====================================================================
+   GLOSSARY
+   One definition per term, written for someone new to trading. Metric
+   labels, table headers and dropdown options all read from here, so a
+   definition is fixed in one place and shows up everywhere the term does.
+   Keys are the exact visible text (or the <option> value for dropdowns).
+   ===================================================================== */
+const HELP = {
+  // Returns
+  'Return':       'Total gain or loss over the period, as a percent of starting cash.',
+  'Total return': 'Total gain or loss over the period, as a percent of starting cash.',
+  'OOS return':   'Return measured only on data the strategy was never tuned on (out of sample). This is the honest number.',
+  'Buy & hold':   'What you would have made buying on day one and doing nothing else. The baseline any strategy has to beat.',
+  'vs B&H':       'Strategy return minus buy-and-hold return. Positive means the strategy beat doing nothing.',
+  'CAGR':         'Compound annual growth rate: the steady yearly return that would reach the same final result.',
+  'Final equity': 'Account value at the end of the period.',
+  'Equity':       'Current account value.',
+  'Ann':          'Return for the whole year.',
+  // Risk-adjusted
+  'Sharpe':       'Return per unit of volatility, annualized. Above 1 is good, above 2 is rare, and above 3 usually means a bug or overfitting.',
+  'OOS Sharpe':   'Sharpe ratio measured only on out-of-sample data.',
+  'Sortino':      'Like Sharpe, but only downside swings count as risk. Big up days are not a problem.',
+  'Calmar':       'Annual return divided by max drawdown: how much you earned per unit of worst-case pain.',
+  'Max DD':       'Max drawdown: the largest drop from a peak to a later low. The worst loss you would have had to sit through.',
+  'Max drawdown': 'The largest drop from a peak to a later low. The worst loss you would have had to sit through.',
+  'Win rate':     'Percent of completed trades that made money. Means little alone: many small wins can be wiped out by one big loss.',
+  // Analysis
+  'Best params':  'The setting combination that scored highest on the objective, in this date range only.',
+  'Train obj.':   'Objective score on the training window, where the settings were tuned.',
+  'Test obj.':    'Objective score on the next window, which the tuner never saw. A big drop from train to test means overfitting.',
+  'P(loss)':      'Share of reshuffled return sequences that ended below starting cash.',
+  'P(beat B&H)':  'Share of reshuffled return sequences that finished ahead of buy and hold.',
+  'Active days':  'Share of days the strategy was allowed to trade, because the market was in the chosen regime.',
+  // Research agent
+  'Trials':          'How many strategy variants the agent tested. More trials means more chances for one to look good by luck.',
+  'Luck benchmark':  'The best Sharpe you would expect from that many trials of pure noise. A real edge has to clear this.',
+  'Deflated Sharpe': 'Probability the true Sharpe beats the luck benchmark, corrected for the number of trials (Bailey & López de Prado). 0.950 or higher passes.',
+  // Execution
+  'Algorithm':           'How the parent order is cut into smaller child orders over time.',
+  'Filled':              'Shares actually traded, out of the shares ordered.',
+  'Rate':                'Fill rate: the share of the parent order that got done.',
+  'Arrival price':       'Mid price when the order started. Every execution cost is measured against it.',
+  'Execution VWAP':      'Average price of your fills, weighted by size.',
+  'Exec VWAP':           'Average price of your fills, weighted by size.',
+  'Slippage vs arrival': 'Distance from your average fill to the arrival price, in basis points (1 bp = 0.01%). Positive is a cost.',
+  'Slippage (bps)':      'Distance from your average fill to the arrival price, in basis points (1 bp = 0.01%). Positive is a cost.',
+  'vs market VWAP':      'Your average price against everyone’s average price in the same window. Positive means you did worse than the market.',
+  'Execution cost':      'What the shares you did fill cost, versus the arrival price.',
+  'Opportunity cost':    'What the unfilled shares cost: the price moved away and you never got them.',
+  'Shortfall':           'Implementation shortfall: execution cost plus opportunity cost. The full price of getting the trade done.',
+  'Position':            'Shares held right now. Negative means short.',
+  'P&L':                 'Profit and loss so far, realized plus unrealized.',
+  'Status':              'Whether the fighter is holding the stock (long) or sitting in cash.',
+  // Dropdown options: algorithms
+  'TWAP': 'Time-weighted: equal slices spread evenly over time. Simple and predictable, but ignores when the market is busy.',
+  'VWAP': 'Volume-weighted: trades more when the market usually trades more, aiming to match the day’s average price.',
+  'POV':  'Percent of volume: trades a fixed share of whatever volume actually prints, so it speeds up and slows down with the market.',
+  // Dropdown options: regimes
+  'TRENDING':        'Prices moving steadily one way. Trend-following strategies tend to do well here.',
+  'MEAN_REVERTING':  'Prices snapping back toward an average. Dip-buying and RSI strategies tend to do well here.',
+  'HIGH_VOLATILITY': 'Large, fast swings, often in sell-offs. Most strategies struggle, and sitting out is often best.',
+  'CHOPPY':          'Sideways with no clear direction. Trend strategies get whipsawed here.',
+};
+// Optimizer objectives are metric keys; reuse the metric definitions.
+Object.assign(HELP, {sharpe: HELP['Sharpe'], sortino: HELP['Sortino'],
+  calmar_ratio: HELP['Calmar'], cagr_pct: HELP['CAGR'], total_return_pct: HELP['Return']});
+// Regime cards are labelled with display names.
+for (const [k, name] of Object.entries({TRENDING: 'Trending', MEAN_REVERTING: 'Mean-Reverting',
+    HIGH_VOLATILITY: 'High Volatility', CHOPPY: 'Choppy'})) HELP[name] = HELP[k];
+
+// Dropdowns that get a live description underneath. Strategy menus fall back
+// to the description the server sends with each strategy.
+const HINTED_SELECTS = ['regAttribStrategy', 'regBtStrategy', 'cmpStrategy',
+  'optObjective', 'wfObjective', 'regBtFilter', 'exAlgo'];
+
+function helpFor(key) {
+  if (HELP[key]) return HELP[key];
+  const st = strategies.find(x => x.id === key);
+  return st ? st.description : '';
+}
+
+// Mark every metric label and table header that has a definition. Runs on
+// every DOM change, because metric strips and tables are rebuilt each run.
+function markHelp(root) {
+  root.querySelectorAll('dt, th').forEach(el => {
+    if (el.dataset.help !== undefined) return;
+    const key = el.textContent.trim();
+    if (!HELP[key]) { el.dataset.help = ''; return; }
+    el.dataset.help = key;
+    el.classList.add('has-help');
+    el.tabIndex = 0;                       // reachable by keyboard, not just mouse
+    el.setAttribute('aria-description', HELP[key]);   // read out by screen readers
+  });
+  HINTED_SELECTS.forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    let hint = sel.parentElement.querySelector('.hint');
+    if (!hint) {
+      hint = document.createElement('p');
+      hint.className = 'hint'; hint.id = id + 'Hint';
+      sel.setAttribute('aria-describedby', hint.id);
+      sel.after(hint);
+      sel.addEventListener('change', () => { hint.textContent = helpFor(sel.value); });
+    }
+    hint.textContent = helpFor(sel.value);
+  });
+}
+
+// Deferred to DOMContentLoaded: `strategies` and other top-level `let`s are
+// declared further down this script, and touching them before that line
+// runs throws (temporal dead zone), even through `typeof`.
+document.addEventListener('DOMContentLoaded', function initHelp() {
+  const tip = document.createElement('div');
+  tip.id = 'tip'; tip.setAttribute('role', 'tooltip');
+  document.body.appendChild(tip);
+
+  function show(el) {
+    const key = el.dataset.help;
+    tip.innerHTML = '<b>' + escHtml(key) + '</b><br>' + escHtml(HELP[key]);
+    tip.classList.add('on');
+    // Place below the term, then clamp inside the viewport so a term at the
+    // right edge does not push the tooltip off screen.
+    const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    let x = r.left, y = r.bottom + 6;
+    x = Math.max(6, Math.min(x, innerWidth - t.width - 6));
+    if (y + t.height > innerHeight - 6) y = r.top - t.height - 6;   // flip above
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  const hide = () => tip.classList.remove('on');
+  const target = e => e.target.closest && e.target.closest('.has-help');
+  document.addEventListener('mouseover', e => { const el = target(e); el ? show(el) : hide(); });
+  document.addEventListener('focusin',   e => { const el = target(e); el ? show(el) : hide(); });
+  document.addEventListener('focusout', hide);
+  document.addEventListener('scroll', hide, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+
+  markHelp(document);
+  // Batched to one pass per frame: a backtest rebuilds hundreds of nodes.
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return; queued = true;
+    requestAnimationFrame(() => { queued = false; markHelp(document); });
+  }).observe(document.body, {childList: true, subtree: true});
+});
 
 // The standard backtest readout, shared by Lab, walk-forward and the
 // regime-gated run so they cannot drift apart again (they had: three copies,
@@ -2851,7 +3015,7 @@ async function runAgent() {
       makeMCard('OOS return', fPct(o.return_pct), sgnCls(o.return_pct)),
       makeMCard('OOS Sharpe', fNum(o.sharpe), sgnCls(o.sharpe)),
       makeMCard('Luck benchmark', fNum(c.luck_benchmark), ''),
-      makeMCard('Deflated Sharpe', fNum(c.deflated_sharpe), c.passed ? 'pos' : 'neg'),
+      makeMCard('Deflated Sharpe', fNum(c.deflated_sharpe, 3), c.passed ? 'pos' : 'neg'),
     ].join('');
 
     const verdict = document.getElementById('agVerdict');

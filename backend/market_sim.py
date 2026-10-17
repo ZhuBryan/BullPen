@@ -32,7 +32,9 @@ only at the boundary.
 Run `python backend/market_sim.py` for the self-check.
 """
 
+import math
 import random
+import time
 
 try:
     from engine.orderbook import BUY, SELL, Book
@@ -85,6 +87,31 @@ class MarketMaker(Agent):
     def __init__(self, name, spread=4, size=10, max_inv=200, **kw):
         super().__init__(name, **kw)
         self.spread, self.size, self.max_inv = spread, size, max_inv
+        # PnL decomposition, kept in integer ticks*shares so it is exact.
+        # A maker's profit has exactly two sources:
+        #   spread capture: buying below (selling above) the fair mid at the
+        #                   moment of the fill. This is the reward for
+        #                   providing liquidity.
+        #   inventory PnL:  the mid moving while you hold a position. This is
+        #                   the risk you carry as a side effect, and it can
+        #                   easily swamp the spread you earned.
+        # `mark` is the mid observed at the start of the current step, before
+        # anyone submitted orders (Simulation.step sets it).
+        self.mark = None
+        self.spread_ticks = 0
+        self.inv_ticks = 0
+        self.fills = 0
+
+    def on_fill(self, side, price_ticks, qty):
+        super().on_fill(side, price_ticks, qty)
+        if self.mark is not None:
+            edge = (self.mark - price_ticks) if side == BUY else (price_ticks - self.mark)
+            self.spread_ticks += edge * qty
+        self.fills += 1
+
+    def pnl_parts(self):
+        """Dollar decomposition. total == spread + inventory exactly (see step)."""
+        return {"spread": self.spread_ticks * TICK, "inventory": self.inv_ticks * TICK}
 
     def act(self, book, mid, history, rnd):
         skew = int(self.spread * (self.position / self.max_inv)) if self.max_inv else 0
@@ -92,6 +119,111 @@ class MarketMaker(Agent):
         ask = mid + self.spread - skew
         orders = []
         if self.position < self.max_inv:
+            orders.append(("limit", BUY, bid, self.size))
+        if self.position > -self.max_inv:
+            orders.append(("limit", SELL, ask, self.size))
+        return orders
+
+
+class AvellanedaStoikov(MarketMaker):
+    """Avellaneda & Stoikov (2008), "High-frequency trading in a limit order book".
+
+    The problem a market maker faces: quote tight and you get filled a lot
+    (more spread captured), but every fill leaves you holding inventory that
+    can lose money if the price moves. A-S solves for the quotes that maximise
+    a risk-averse (exponential) utility of final wealth, and the answer comes
+    in two clean pieces:
+
+      reservation price  r = s - q * gamma * sigma^2 * (T - t)
+          Where you are indifferent to one more share. Long inventory (q > 0)
+          pushes r BELOW the mid, so your quotes shade down: your ask becomes
+          more attractive (shedding stock) and your bid less so.
+
+      optimal spread     delta = gamma * sigma^2 * (T - t) + (2/gamma) * ln(1 + gamma/k)
+          The first term is a risk premium (more volatility, more remaining
+          time, wider). The second comes from the order-arrival model: fills
+          arrive at rate A*exp(-k * distance), so k says how fast fill
+          probability decays as you quote further from the mid.
+
+    gamma is risk aversion. gamma -> 0 recovers a symmetric maker that ignores
+    inventory; larger gamma means stronger skew and tighter inventory control.
+
+    Units: everything is in TICKS and STEPS. sigma is the std of the mid's
+    per-step change in ticks, (T - t) is in steps, k is per tick, q is shares.
+
+    Horizon choice: ROLLING, (T - t) = `horizon` steps, constant. The paper has
+    a terminal time (end of the trading day), so risk aversion fades to zero as
+    the close approaches and is huge at the open. This simulation has no close,
+    and a terminal clock would make behaviour depend on how many steps you
+    happened to run. A rolling horizon ("I care about the next H steps of
+    risk") is the common practical variant and keeps the maker stationary.
+    """
+
+    def __init__(self, name, gamma=0.1, k=1.5, horizon=5, window=50,
+                 sigma_floor=0.25, max_offset=50, size=10, max_inv=200, **kw):
+        super().__init__(name, spread=0, size=size, max_inv=max_inv, **kw)
+        self.max_offset = max_offset
+        self.gamma, self.k, self.horizon = gamma, k, horizon
+        self.window, self.sigma_floor = window, sigma_floor
+        self.last_quote = (None, None)   # (bid, ask) ticks, for charts
+
+    def sigma(self, history):
+        """Per-step std of mid changes over the recent window, in ticks.
+
+        Floored: early on (or in a dead-calm patch) the estimate is ~0, and a
+        zero sigma would make the maker ignore inventory risk entirely.
+        """
+        h = history[-(self.window + 1):]
+        if len(h) < 3:
+            return self.sigma_floor
+        d = [b - a for a, b in zip(h, h[1:])]
+        m = sum(d) / len(d)
+        var = sum((x - m) ** 2 for x in d) / (len(d) - 1)
+        return max(math.sqrt(var), self.sigma_floor)
+
+    def quotes(self, mid, history):
+        """(reservation price, total spread) in ticks, as floats."""
+        risk = self.gamma * self.sigma(history) ** 2 * self.horizon
+        r = mid - self.position * risk
+        delta = risk + (2 / self.gamma) * math.log(1 + self.gamma / self.k)
+        return r, delta
+
+    def act(self, book, mid, history, rnd):
+        # Fair value from the book as it stands NOW, after our own quotes were
+        # cancelled. The `mid` handed to every agent is measured before the
+        # cancel, so it includes our previous quotes. A maker that sits at the
+        # top of book and centres on that mid is centring on itself: in
+        # testing, that froze the price completely (mid constant for 1000
+        # steps, inventory PnL exactly zero). Excluding our own quotes is what
+        # a real maker does too: you estimate fair value from everyone else.
+        bb = ba = None
+        if book is not None:
+            bb, ba = book.best_bid(), book.best_ask()
+        s = (bb + ba) / 2 if bb is not None and ba is not None else mid
+        r, delta = self.quotes(s, history)
+        bid = math.floor(r - delta / 2)    # round AWAY from the mid: never
+        ask = math.ceil(r + delta / 2)     # quote tighter than the model says
+        # Sanity cap: never rest further than max_offset ticks from fair value.
+        # With high gamma the formula can ask for quotes $5+ away; when one
+        # side of the book is empty, the next market order sweeps straight
+        # into that quote at an absurd price (a mini flash crash). Real desks
+        # cap this too.
+        bid = max(bid, math.floor(s) - self.max_offset)
+        ask = min(ask, math.ceil(s) + self.max_offset)
+        # Stay passive. A bid at or above the best ask would execute
+        # immediately, turning a liquidity-providing quote into a liquidity-
+        # taking trade that pays the spread instead of earning it.
+        # If a side is empty, fall back to the step's mid as the reference:
+        # with no other asks, an unclamped long-inventory ask can land far
+        # below the market (even below zero), and the first market buy lifts
+        # it. In testing that one fill lost $200k on a 10-share position.
+        hi = ba if ba is not None else mid + 1
+        lo = bb if bb is not None else mid - 1
+        bid = max(1, min(bid, hi - 1))
+        ask = max(ask, lo + 1, bid + 1)
+        self.last_quote = (bid, ask)
+        orders = []
+        if self.position < self.max_inv:          # hard inventory limit
             orders.append(("limit", BUY, bid, self.size))
         if self.position > -self.max_inv:
             orders.append(("limit", SELL, ask, self.size))
@@ -224,11 +356,12 @@ class Simulation:
         mid = self.mid()
         # Makers cancel and requote each step; otherwise stale quotes pile up
         # and the book fills with orders nobody intends to honour.
-        for a in self.agents:
-            if isinstance(a, MarketMaker):
-                for oid in a.live:
-                    self.book.cancel(oid)
-                a.live.clear()
+        makers = [a for a in self.agents if isinstance(a, MarketMaker)]
+        for a in makers:
+            for oid in a.live:
+                self.book.cancel(oid)
+            a.live.clear()
+            a.mark = mid      # the mid every fill this step is measured against
 
         order = list(self.agents)
         self.rnd.shuffle(order)          # no agent gets a permanent time edge
@@ -253,7 +386,17 @@ class Simulation:
                 "l": min(traded) * TICK, "c": traded[-1] * TICK,
                 "v": len(traded),
             })
-        self.history.append(self.mid())
+        new_mid = self.mid()
+        self.history.append(new_mid)
+        # Inventory PnL: the position held after this step's fills, times the
+        # mid change from this step's mark to the next step's mark. Why this
+        # pairing makes the identity exact (q = position, m = mark):
+        #   q_end*m_end = sum_s [ q_{s+1}*(m_{s+1}-m_s) + (q_{s+1}-q_s)*m_s ]
+        # The first sum is inventory PnL; the second, plus the cash paid for
+        # the fills, is exactly spread capture measured at m_s. So
+        #   equity(m_end) - start_cash == spread capture + inventory PnL.
+        for a in makers:
+            a.inv_ticks += a.position * (new_mid - mid)
         self._check()
 
     def run(self, steps=500):
@@ -276,6 +419,86 @@ class Simulation:
                  for a in self.agents],
                 key=lambda d: -d["pnl"]),
         }
+
+
+def _maker_summary(m, inv, mid_end):
+    total = m.equity(mid_end) - m.start_cash
+    parts = m.pnl_parts()
+    n = len(inv)
+    mean = sum(inv) / n
+    std = math.sqrt(sum((x - mean) ** 2 for x in inv) / n)
+    return {
+        "total_pnl": round(total, 2),
+        "spread_capture": round(parts["spread"], 2),
+        "inventory_pnl": round(parts["inventory"], 2),
+        "identity_error": abs(total - parts["spread"] - parts["inventory"]),
+        "inventory_std": round(std, 2),
+        "max_abs_inventory": max(abs(x) for x in inv),
+        "fills": m.fills,
+        "pnl_per_fill": round(total / m.fills, 4) if m.fills else 0.0,
+        "time_at_limit": round(sum(abs(x) >= m.max_inv for x in inv) / n, 4),
+    }
+
+
+def run_maker(gamma=0.1, k=1.5, steps=1000, seed=7, inventory_limit=200,
+              horizon=5, size=10, naive_spread=4, max_points=600):
+    """A-S maker vs the naive MarketMaker, same seed, same background market.
+
+    The subject maker is added as a seventh agent alongside default_agents().
+    Note the two markets share a seed but not a price path: the subject's own
+    quotes change what trades, so the paths diverge after the first fills.
+    That is the honest comparison (your quotes move the market); a fixed
+    replayed path would hide it.
+    """
+    if gamma <= 0 or k <= 0:
+        raise ValueError("gamma and k must be positive")
+    steps = int(steps)
+    if not 10 <= steps <= 20_000:
+        raise ValueError("steps must be in [10, 20000]")
+
+    def one(subject):
+        sim = Simulation(agents=default_agents() + [subject], seed=seed)
+        rows = []
+        for _ in range(steps):
+            sim.step()
+            bid, ask = getattr(subject, "last_quote", (None, None))
+            rows.append((sim.history[-1], subject.position, bid, ask,
+                         subject.spread_ticks, subject.inv_ticks,
+                         subject.equity(sim.history[-1]) - subject.start_cash))
+        return sim, rows
+
+    a_s = AvellanedaStoikov("A-S", gamma=gamma, k=k, horizon=horizon,
+                            size=size, max_inv=inventory_limit)
+    naive = MarketMaker("Naive", spread=naive_spread, size=size, max_inv=inventory_limit)
+    sim_a, rows_a = one(a_s)
+    sim_n, rows_n = one(naive)
+
+    stride = max(1, -(-steps // max_points))
+    pick = rows_a[::stride]
+    pick_n = rows_n[::stride]
+    px = lambda t: None if t is None else round(t * TICK, 2)
+    return {
+        "params": {"gamma": gamma, "k": k, "steps": steps, "seed": seed,
+                   "inventory_limit": inventory_limit, "horizon": horizon,
+                   "size": size, "naive_spread": naive_spread},
+        "step": list(range(1, steps + 1, stride)),
+        "paths": {
+            "mid": [px(r[0]) for r in pick],
+            "inventory": [r[1] for r in pick],
+            "bid": [px(r[2]) for r in pick],
+            "ask": [px(r[3]) for r in pick],
+            "spread_capture": [round(r[4] * TICK, 2) for r in pick],
+            "inventory_pnl": [round(r[5] * TICK, 2) for r in pick],
+            "total_pnl": [round(r[6], 2) for r in pick],
+            "naive_mid": [px(r[0]) for r in pick_n],
+            "naive_inventory": [r[1] for r in pick_n],
+            "naive_total_pnl": [round(r[6], 2) for r in pick_n],
+        },
+        "summary": {
+            "avellaneda_stoikov": _maker_summary(a_s, [r[1] for r in rows_a], sim_a.history[-1]),
+            "naive": _maker_summary(naive, [r[1] for r in rows_n], sim_n.history[-1]),
+        },
+    }
 
 
 def demo():
@@ -334,8 +557,51 @@ def demo():
     assert BUY not in quotes(200), "maker must stop bidding when fully long"
     assert SELL not in quotes(-200), "maker must stop offering when fully short"
 
+    # ---- Avellaneda-Stoikov ----
+    def as_quotes(pos, gamma=0.1):
+        m = AvellanedaStoikov("as", gamma=gamma)
+        m.position = pos
+        hist = [10_000 + (i % 3) for i in range(60)]          # some volatility
+        return {side: p for _, side, p, _ in m.act(None, 10_000, hist, None)}
+
+    f0, fl, fs = as_quotes(0), as_quotes(10), as_quotes(-10)
+    assert f0[BUY] < 10_000 < f0[SELL], "flat A-S maker quotes around the mid"
+    assert fl[BUY] < f0[BUY] and fl[SELL] < f0[SELL], "long inventory lowers r"
+    assert fs[BUY] > f0[BUY] and fs[SELL] > f0[SELL], "short inventory raises r"
+    assert as_quotes(10, gamma=0.3)[BUY] < fl[BUY], "more risk aversion, more skew"
+    assert BUY not in as_quotes(200), "hard inventory limit"
+
+    # passivity: even a huge skew must not cross the live book
+    b = Book()
+    b.limit(BUY, 9_990, 5)
+    b.limit(SELL, 9_995, 5)
+    m = AvellanedaStoikov("as", gamma=1.0, max_offset=10_000)
+    m.position = 150
+    q = {side: p for _, side, p, _ in m.act(b, 9_992, [10_000, 10_005] * 30, None)}
+    assert q[BUY] < 9_995 and q[SELL] > 9_990, f"quote went aggressive: {q}"
+
+    t0 = time.perf_counter()
+    rm = run_maker()
+    t_maker = time.perf_counter() - t0
+    a_s, nv = rm["summary"]["avellaneda_stoikov"], rm["summary"]["naive"]
+    for name, sm in (("A-S", a_s), ("naive", nv)):
+        assert sm["identity_error"] < 1e-6, f"{name}: total != spread + inventory"
+        assert sm["fills"] > 50, f"{name} barely traded"
+    # The paper's core claim: skewing by inventory keeps inventory tighter.
+    assert a_s["inventory_std"] < nv["inventory_std"], (a_s, nv)
+    assert run_maker(steps=300) == run_maker(steps=300), "run_maker must be deterministic"
+    assert len(rm["paths"]["mid"]) == len(rm["step"]) <= 600
+    big = run_maker(steps=2_000)["paths"]["mid"]
+    assert len(big) <= 600, "paths must be downsampled"
+
     print(f"ok — {out['trades']} trades, {len(out['bars'])} bars, "
           f"last {out['last_price']}, zero-sum PnL, deterministic")
+    print(f"ok — A-S vs naive ({t_maker:.2f}s): "
+          f"PnL {a_s['total_pnl']} vs {nv['total_pnl']}, "
+          f"spread {a_s['spread_capture']} vs {nv['spread_capture']}, "
+          f"inventory {a_s['inventory_pnl']} vs {nv['inventory_pnl']}, "
+          f"inv std {a_s['inventory_std']} vs {nv['inventory_std']}, "
+          f"fills {a_s['fills']} vs {nv['fills']}; identity holds for both")
 
 
 if __name__ == "__main__":

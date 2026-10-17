@@ -1,0 +1,144 @@
+name: CI
+
+# Every push and pull request runs the whole correctness story:
+#   python  every Python self-check and the 450+ endpoint checks
+#   rust    cargo test, then the Python-vs-Rust differential test on 20,000
+#           ops, on Linux and on Windows (where the project is developed)
+#   pyo3    builds the Rust engine as a Python extension, proves it matches
+#           the Python engine event for event, then reruns the entire backend
+#           test suite with the Rust book underneath it
+# Benchmarks run only on pushes to main (and by hand), and their numbers are
+# uploaded as artifacts rather than asserted: CI runners are shared machines,
+# so a timing threshold would fail at random.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Tests use deterministic synthetic prices instead of downloading from
+  # Yahoo, which is slow and rate-limits shared runners. See backend/data.py.
+  BULLPEN_OFFLINE: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt websockets
+      - name: Engine self-checks
+        working-directory: engine
+        run: python test.py
+      - name: Backend endpoint checks
+        run: python backend/test_bullpen.py
+      - name: Backend module self-checks
+        run: |
+          for m in fills market_sim exec_sim stylized book_backtest portfolio agent; do
+            echo "== backend.$m"
+            python -m backend.$m
+          done
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine/rust
+            engine/rust/bench
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: cargo test
+        working-directory: engine/rust
+        run: cargo test
+      - name: cargo build --release
+        working-directory: engine/rust
+        run: cargo build --release
+      - name: Differential test (Python oracle vs Rust, 20,000 ops)
+        working-directory: engine
+        run: python diff_test.py check ops.txt 20000
+      - name: Criterion benches compile
+        working-directory: engine/rust/bench
+        run: cargo bench --no-run
+
+  pyo3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine/rust
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt "maturin>=1.7,<2"
+      - name: Build the Rust engine as a Python extension
+        working-directory: engine/rust
+        run: |
+          maturin build --release --out dist
+          pip install dist/*.whl
+      - name: Python vs Rust through PyO3 (fails if the extension is missing)
+        env:
+          BULLPEN_REQUIRE_RUST: "1"
+        run: python engine/test_pyo3.py
+      - name: The app now runs on the Rust engine
+        run: python -c "from engine.fastbook import ENGINE; assert ENGINE == 'rust', ENGINE; print('engine:', ENGINE)"
+      - name: Whole backend suite on the Rust book
+        run: |
+          python backend/test_bullpen.py
+          python -m backend.market_sim
+          python -m backend.exec_sim
+          python -m backend.book_backtest
+
+  bench:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: [rust]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine/rust
+            engine/rust/bench
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Shared op file, so both engines do identical work
+        working-directory: engine
+        run: python diff_test.py gen ops.txt 200000
+      - name: Python benchmark (5 repeats, median and spread)
+        working-directory: engine
+        run: python bench.py --repeats 5 --ops-file ops.txt --json ../bench-python.json
+      - name: Rust benchmark and lock-free pipeline
+        working-directory: engine/rust
+        run: |
+          cargo build --release
+          ./target/release/bullpen_engine bench ../ops.txt | tee ../../bench-rust.txt
+          ./target/release/bullpen_engine pipeline ../ops.txt | tee -a ../../bench-rust.txt
+      - name: Criterion
+        working-directory: engine/rust/bench
+        run: cargo bench | tee ../../../bench-criterion.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: |
+            bench-python.json
+            bench-rust.txt
+            bench-criterion.txt

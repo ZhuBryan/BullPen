@@ -1,5 +1,7 @@
 # Bullpen: Exchange Engine & Quantitative Research Platform
 
+[![CI](https://github.com/ZhuBryan/BullPen/actions/workflows/ci.yml/badge.svg)](https://github.com/ZhuBryan/BullPen/actions/workflows/ci.yml)
+
 Two halves. A limit order book exchange built from scratch, and a research platform that uses it.
 
 **The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to Rust. The two are differential-tested: fed identical order streams, they produce byte-identical event logs, and the Rust version runs **12.7x faster (3.4M orders/sec) with 13x lower p99.9 latency**.

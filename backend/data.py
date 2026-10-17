@@ -114,8 +114,11 @@ def get_prices(ticker: str, start: str, end: str) -> tuple[pd.DataFrame, str]:
         if not df.empty:
             return df, "cache"
 
-    # 2. Real data from Yahoo (free)
-    df = _download_yfinance(ticker, start, end)
+    # 2. Real data from Yahoo (free). BULLPEN_OFFLINE=1 skips it, so CI runs
+    # on the deterministic synthetic data instead of failing whenever Yahoo
+    # is slow or rate-limits a shared runner.
+    offline = os.environ.get("BULLPEN_OFFLINE") == "1"
+    df = None if offline else _download_yfinance(ticker, start, end)
     if df is not None and len(df) >= 30:
         df.to_csv(path)  # cache for next time
         return df, "yahoo"

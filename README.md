@@ -10,6 +10,8 @@ Around it sits the rest of a trading stack: **FIX 4.4 order entry** and an OMS w
 
 No paid APIs, no API keys. Free Yahoo Finance data with a synthetic offline fallback.
 
+**Live demo: [bullpen-858e.onrender.com](https://bullpen-858e.onrender.com)**
+
 There is a [technical writeup](WRITEUP.md) covering the optimization work and, more usefully, the parts I got wrong.
 
 ## Quick start
@@ -32,19 +34,11 @@ python run.py
 
 Then open http://localhost:8000.
 
-## Deploy it for free
+## Hosting
 
-You can put Bullpen online for free in a few minutes using [Render](https://render.com) and its free web service tier:
+The live demo runs on [Render](https://render.com)'s free tier. Free instances sleep after about 15 minutes idle and take 30 to 50 seconds to wake, so a GitHub Actions job (`.github/workflows/keep-warm.yml`) pings the site every 10 minutes to keep it awake for visitors.
 
-1. Push this repo to GitHub (if you haven't already).
-2. Create a free account at [render.com](https://render.com).
-3. Click "New +", then "Blueprint".
-4. Connect your GitHub repo. Render reads the `render.yaml` at the project root and fills in the build command, start command, and free plan for you.
-5. Click Deploy.
-
-When it finishes, your app is live at a URL like `https://your-app.onrender.com`.
-
-One thing to know about the free tier: it goes to sleep after about 15 minutes without traffic. The first request after it wakes up takes roughly 30 to 50 seconds, which is expected. Every request after that runs at full speed until it goes idle again.
+To host your own copy: fork the repo, create a Render account, choose New + then Blueprint, and connect the fork. Render reads `render.yaml` for the build and start commands. Then set an `APP_URL` repository variable to your new URL so the keep-warm job pings yours instead of mine.
 
 ## Arena tab: watch strategies fight it out
 

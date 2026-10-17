@@ -345,3 +345,61 @@ extra fields alongside the normal backtest output:
 The unfiltered buy & hold baseline (`buy_hold`) is unchanged (not regime-gated),
 so the user can see whether the regime-gating beat passive holding.
 ```
+
+## 7. Roadmap phase (CI, Rust in the product, book backtests, research)
+
+Built in parallel by separate agents. **Each agent edits only the files it
+owns.** Shared files (`backend/main.py`, `frontend/index.html`,
+`engine/test.py`, `backend/test_bullpen.py`, `requirements.txt`,
+`render.yaml`, `.github/`, `README.md`, `WRITEUP.md`, `NOTES.md`) are owned
+by the integrator, who wires endpoints, registers tests and commits. Agents
+never commit.
+
+Conventions for every module (from CLAUDE.md): stdlib/numpy/pandas only (no
+new dependencies except where listed below), no paid APIs, beginner-friendly
+comments that explain the finance, signals on day T trade on day T+1, and one
+`demo()` self-check with `assert`s that `python -m <module>` runs and that
+raises on failure. Prices inside the engine are integer ticks.
+
+### 7.1 Portable book interface
+
+Both `engine.orderbook.Book` (Python) and the PyO3 `bullpen_engine.Book`
+(Rust) expose exactly this. Simulator and backtester code use nothing else.
+
+| Method | Returns |
+|---|---|
+| `limit(side, price, qty)` | order id (int) |
+| `market(side, qty)` | order id (int) |
+| `cancel(order_id)` | bool |
+| `best_bid()` / `best_ask()` | int ticks or `None` |
+| `depth(side, levels=5)` | list of `(price, live_qty)`, best first |
+| `event_count()` | int |
+| `events_since(n)` | list of event tuples from index n |
+| `has_order(order_id)` | bool (resting and live) |
+| `order_ids()` | list of live resting ids |
+
+`side` is `"B"` or `"S"`. Event tuples are identical to the Python engine's,
+including trailing `seq` and `ts` (ts may differ between engines; seq may not).
+`engine/fastbook.py` exports `Book` (Rust when the extension imports, else
+Python) and `ENGINE = "rust" | "python"`.
+
+### 7.2 Ownership
+
+| Agent | Owns (creates or edits) | Delivers |
+|---|---|---|
+| A, Rust | `engine/rust/**`, `engine/fastbook.py`, `engine/test_pyo3.py` | PyO3 binding behind a cargo feature (core crate stays dependency-free), maturin `pyproject.toml`, criterion benches in a separate crate, differential test Python-vs-binding |
+| B, Microstructure | `backend/market_sim.py`, `backend/stylized.py` | Avellaneda-Stoikov maker with PnL decomposition; stylized-facts analysis of real vs simulated returns, plus a capture-file path |
+| C, Book backtest | `backend/book_backtest.py` | Event-driven backtester whose orders fill against a modelled order book, with per-trade TCA |
+| D, Portfolio | `backend/portfolio.py` | Multi-asset backtest, position sizing, VaR/CVaR, beta, factor exposure |
+| E, Infra | `engine/fix_session.py`, `engine/bench.py` | FIX 4.4 session layer over TCP; benchmark rigour (repeats, spread, JSON) |
+
+### 7.3 Endpoints the integrator will add
+
+Each agent's module exposes one top-level function returning a JSON-ready
+dict; the integrator wraps it.
+
+- `POST /api/backtest` gains `fill_model: "close" | "book"` -> `book_backtest.run(...)`
+- `POST /api/sim/maker` -> `market_sim.run_maker(...)`
+- `POST /api/stylized` -> `stylized.compare(...)`
+- `POST /api/portfolio` -> `portfolio.run(...)`
+- `GET  /api/metrics` gains `bullpen_engine_info{engine="rust|python"} 1`

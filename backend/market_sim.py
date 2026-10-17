@@ -188,7 +188,7 @@ class Simulation:
     def _settle(self):
         """Attribute every new trade event to both sides."""
         prices = []
-        for ev in self.book.events[self._seen_events:]:
+        for ev in self.book.events_since(self._seen_events):
             if ev[0] != "trade":
                 continue
             # Index rather than unpack: events carry trailing seq/ts fields.
@@ -198,7 +198,7 @@ class Simulation:
                 if who:
                     who[0].on_fill(who[1], price, qty)
             prices.append(price)
-        self._seen_events = len(self.book.events)
+        self._seen_events = self.book.event_count()
         return prices
 
     def _check(self):
@@ -242,7 +242,7 @@ class Simulation:
         # this, `owner` grows by every order ever submitted for the life of the
         # run, and non-maker agents accumulate dead ids in `live` forever.
         if len(self.owner) > 20_000:
-            alive = set(self.book.orders)
+            alive = set(self.book.order_ids())
             self.owner = {oid: v for oid, v in self.owner.items() if oid in alive}
             for a in self.agents:
                 a.live = [oid for oid in a.live if oid in alive]
@@ -266,7 +266,7 @@ class Simulation:
         return {
             "bars": self.bars,
             "last_price": round(self.last * TICK, 2),
-            "trades": sum(1 for e in self.book.events if e[0] == "trade"),
+            "trades": sum(1 for e in self.book.events_since(0) if e[0] == "trade"),
             "agents": sorted(
                 [{"name": a.name, "kind": type(a).__name__,
                   "position": a.position,

@@ -105,7 +105,7 @@ def run_execution(side=BUY, total_qty=500, algo="TWAP", steps=200,
     slice_idx = 0
 
     for i in range(steps):
-        before = len(sim.book.events)
+        before = sim.book.event_count()
 
         if algo in ("TWAP", "VWAP"):
             if i % every == 0 and slice_idx < len(schedule):
@@ -113,7 +113,8 @@ def run_execution(side=BUY, total_qty=500, algo="TWAP", steps=200,
                 slice_idx += 1
         else:
             # Participate against the volume the market printed last step.
-            last_vol = sum(e[2] for e in sim.book.events[-40:] if e[0] == "trade")
+            last_vol = sum(e[2] for e in sim.book.events_since(max(0, sim.book.event_count() - 40))
+                       if e[0] == "trade")
             exec_agent.pending = pov.child_qty(last_vol, exec_agent.remaining)
 
         sim.step()
@@ -121,7 +122,7 @@ def run_execution(side=BUY, total_qty=500, algo="TWAP", steps=200,
 
         # Split new prints into ours and the market's.
         our_ids = {oid for oid, (a, _s) in sim.owner.items() if a is exec_agent}
-        for ev in sim.book.events[before:]:
+        for ev in sim.book.events_since(before):
             if ev[0] != "trade":
                 continue
             _, price, qty, aggressor, resting = ev[:5]

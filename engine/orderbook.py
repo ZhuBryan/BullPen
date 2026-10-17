@@ -116,6 +116,25 @@ class Book:
         return [(p, sum(o.remaining for o in book[p] if not o.cancelled))
                 for p in chosen]
 
+    # ---- portable interface --------------------------------------------
+    # The subset of Book that the Rust port also exposes through PyO3 (see
+    # SPEC.md section 7). Code that should run on either engine (the market
+    # simulator, the order-book backtester) uses only these plus limit /
+    # market / cancel / best_bid / best_ask / depth, never `events` or
+    # `orders` directly: handing a whole Rust-side list to Python on every
+    # step would turn an O(n) simulation into O(n^2) copying.
+    def event_count(self):
+        return len(self.events)
+
+    def events_since(self, n):
+        return self.events[n:]
+
+    def has_order(self, order_id):
+        return order_id in self.orders
+
+    def order_ids(self):
+        return list(self.orders)
+
     # ---- commands ------------------------------------------------------
     def limit(self, side, price, qty):
         # Pass price through unconverted so _submit can reject a fractional one.

@@ -881,6 +881,22 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <p id="simErr" class="error"></p>
       </div>
       <div class="card">
+        <p class="label">Execution &amp; TCA</p>
+        <div class="field mb-3"><label for="exSide">Side</label>
+          <select id="exSide"><option>BUY</option><option>SELL</option></select></div>
+        <div class="field mb-3"><label for="exQty">Parent quantity</label>
+          <input id="exQty" type="number" value="500" min="1" max="100000"></div>
+        <div class="field mb-3"><label for="exAlgo">Algorithm</label>
+          <select id="exAlgo">
+            <option value="TWAP">TWAP (equal slices)</option>
+            <option value="VWAP">VWAP (volume profile)</option>
+            <option value="POV">POV (percent of volume)</option>
+          </select></div>
+        <button id="exBtn" class="w-full" onclick="runExecution()">Work the order</button>
+        <button id="exCmpBtn" class="w-full ghost mt-2" onclick="runExecution(true)">Compare all three</button>
+        <p id="exErr" class="error"></p>
+      </div>
+      <div class="card">
         <p class="label">Research agent</p>
         <div class="field mb-3"><label for="agTicker">Ticker</label>
           <input id="agTicker" value="AAPL"></div>
@@ -926,7 +942,22 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="exCard" style="display:none">
+      <h2>Execution and transaction cost analysis</h2>
+      <p class="sub mb-4">
+        A parent order worked through the live book. Child orders match against whatever
+        the agents are quoting, so the algorithm pays the spread and moves the book rather
+        than filling at an assumed price. Cost is implementation shortfall against the
+        arrival price, split into what the traded shares cost and the opportunity cost of
+        the shares that never filled. Positive always means worse for the trader.
+      </p>
+      <dl class="metrics-grid" id="exMetrics"></dl>
+      <div class="chart-box chart-md mt-4"><canvas id="exChart"></canvas></div>
+      <div class="vol-label">Mid price over the working period</div>
+      <div id="exCompare" class="mt-4"></div>
+    </div>
+
+    <div class="card" id="agCard">
       <h2>Research agent · searches, then discounts itself</h2>
       <p class="sub mb-4">
         The agent proposes strategies, backtests them, and refines. The interesting part is
@@ -2629,6 +2660,105 @@ async function runSim() {
     err.textContent = e.message; err.style.display = 'block';
   } finally {
     btn.disabled = false; btn.textContent = 'Run market';
+  }
+}
+
+let exChart = null;
+
+// Cost figures read best when the sign convention is visible: positive is
+// always worse for the trader, whichever way they are going.
+function costClass(v) { return v > 0 ? 'neg' : (v < 0 ? 'pos' : ''); }
+
+async function runExecution(compare = false) {
+  const btn = document.getElementById(compare ? 'exCmpBtn' : 'exBtn');
+  const err = document.getElementById('exErr');
+  const label = btn.textContent;
+  err.style.display = 'none';
+  document.getElementById('engineResults').style.display = 'flex';
+  document.getElementById('enginePlaceholder').style.display = 'none';
+  document.getElementById('exCard').style.display = 'block';
+  btn.disabled = true; btn.textContent = 'Working…';
+  try {
+    const res = await fetch('/api/execution/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        side: document.getElementById('exSide').value,
+        qty:  Math.max(1, Number(document.getElementById('exQty').value) || 500),
+        algo: document.getElementById('exAlgo').value,
+        compare,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Execution failed');
+    const d = await res.json();
+
+    if (d.compare) {
+      document.getElementById('exMetrics').innerHTML = '';
+      if (exChart) { exChart.destroy(); exChart = null; }
+      const rows = Object.entries(d.compare).map(([algo, r]) => {
+        const t = r.tca;
+        return '<tr><td><b>' + escHtml(algo) + '</b></td>' +
+          '<td class="ta-r num">' + t.filled + ' / ' + r.ordered + '</td>' +
+          '<td class="ta-r num">' + (t.fill_rate * 100).toFixed(0) + '%</td>' +
+          '<td class="ta-r num">' + Number(t.exec_vwap).toFixed(3) + '</td>' +
+          '<td class="ta-r num ' + costClass(t.arrival_slippage_bps) + '">' +
+            Number(t.arrival_slippage_bps).toFixed(1) + '</td>' +
+          '<td class="ta-r num ' + costClass(t.implementation_shortfall) + '">' +
+            Number(t.implementation_shortfall).toFixed(2) + '</td></tr>';
+      }).join('');
+      document.getElementById('exCompare').innerHTML =
+        '<table class="lb-table"><thead><tr><th>Algo</th>' +
+        '<th class="ta-r">Filled</th><th class="ta-r">Rate</th>' +
+        '<th class="ta-r">Exec VWAP</th><th class="ta-r">Slippage (bps)</th>' +
+        '<th class="ta-r">Shortfall</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<p class="sub text-sm mt-2">Same market, same seed, same parent order. ' +
+        'Positive slippage and shortfall are costs.</p>';
+      return;
+    }
+
+    const t = d.tca;
+    document.getElementById('exCompare').innerHTML = '';
+    document.getElementById('exMetrics').innerHTML = [
+      makeMCard('Algorithm', escHtml(d.algo) + ' ' + escHtml(d.side), 'text'),
+      makeMCard('Filled', t.filled + ' / ' + d.ordered,
+                t.fill_rate >= 0.99 ? 'pos' : 'neg'),
+      makeMCard('Arrival price', d.arrival_px, ''),
+      makeMCard('Execution VWAP', Number(t.exec_vwap).toFixed(3), ''),
+      makeMCard('Slippage vs arrival', Number(t.arrival_slippage_bps).toFixed(1) + ' bps',
+                costClass(t.arrival_slippage_bps)),
+      makeMCard('vs market VWAP', t.vs_market_vwap_bps === null ? 'n/a'
+                : Number(t.vs_market_vwap_bps).toFixed(1) + ' bps',
+                costClass(t.vs_market_vwap_bps)),
+      makeMCard('Execution cost', Number(t.execution_cost).toFixed(2),
+                costClass(t.execution_cost)),
+      makeMCard('Opportunity cost', Number(t.opportunity_cost).toFixed(2),
+                costClass(t.opportunity_cost)),
+      makeMCard('Shortfall', Number(t.implementation_shortfall).toFixed(2),
+                costClass(t.implementation_shortfall)),
+    ].join('');
+
+    if (HAS_CHARTS) {
+      if (exChart) exChart.destroy();
+      exChart = new Chart(document.getElementById('exChart'), {
+        type: 'line',
+        data: {labels: d.path.map((_, i) => i + 1), datasets: [
+          {label: 'Mid', data: d.path, borderColor: TOKENS.accent,
+           backgroundColor: areaFill(TOKENS.accent), fill: true,
+           borderWidth: 1.6, pointRadius: 0, tension: 0.25,
+           cubicInterpolationMode: 'monotone'},
+          {label: 'Arrival', data: d.path.map(() => d.arrival_px),
+           borderColor: TOKENS.muted, borderWidth: 1.2, pointRadius: 0,
+           borderDash: [6, 4]},
+        ]},
+        options: chartOpts({animation: false,
+          interaction: {mode: 'index', intersect: false},
+          plugins: {legend: {display: true,
+            labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
+      });
+    }
+  } catch (e) {
+    err.textContent = e.message; err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = label;
   }
 }
 

@@ -69,6 +69,17 @@ class SimRequest(BaseModel):
     seed: int = 7
 
 
+class ExecutionRequest(BaseModel):
+    side: str = "BUY"                 # BUY | SELL
+    qty: int = Field(default=500, gt=0, le=100_000)
+    algo: str = "TWAP"                # TWAP | VWAP | POV
+    steps: int = Field(default=200, ge=50, le=1_000)
+    slices: int = Field(default=10, ge=1, le=100)
+    participation: float = Field(default=0.10, gt=0, le=1)
+    seed: int = 7
+    compare: bool = False             # run all three algos on the same market
+
+
 class AITranslateRequest(BaseModel):
     description: str = ""
     provider: str = "openai"       # openai | anthropic | gemini | local
@@ -322,6 +333,35 @@ def agent_search(req: AgentRequest):
     out["ticker"] = req.ticker.upper().strip()
     out["data_source"] = source
     return out
+
+
+@app.post("/api/execution/run")
+def execution_run(req: ExecutionRequest):
+    """
+    Work a parent order through the simulated market and score the execution.
+
+    Child orders are matched against the live order book, so the algorithm pays
+    the spread and moves the book rather than filling at an assumed price. The
+    result is implementation shortfall against the arrival price, decomposed
+    into the cost of what traded and the opportunity cost of what did not.
+    """
+    from backend.exec_sim import ALGOS, compare_algos, run_execution
+    from engine.orderbook import BUY, SELL
+
+    algo = req.algo.upper()
+    if algo not in ALGOS:
+        raise HTTPException(400, f"algo must be one of {', '.join(ALGOS)}")
+    side_str = req.side.upper()
+    if side_str not in ("BUY", "SELL"):
+        raise HTTPException(400, "side must be BUY or SELL")
+    side = BUY if side_str == "BUY" else SELL
+
+    if req.compare:
+        return {"compare": compare_algos(total_qty=req.qty, steps=req.steps,
+                                         seed=req.seed, side=side)}
+    return run_execution(side=side, total_qty=req.qty, algo=algo,
+                         steps=req.steps, slices=req.slices,
+                         participation=req.participation, seed=req.seed)
 
 
 @app.post("/api/sim/run")

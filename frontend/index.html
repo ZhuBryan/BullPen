@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bullpen — Trading Arena &amp; Backtester</title>
+<title>Bullpen · Trading Arena &amp; Backtester</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
@@ -29,7 +29,6 @@
   --accent:   #4c7bf3;
   --accentH:  #6f9bff;
   --accent-soft: rgba(76,123,243,0.14);
-  --accent-glow: rgba(76,123,243,0.40);
   --green:    #22c55e;
   --red:      #ef4444;
   --amber:    #f59e0b;
@@ -42,29 +41,25 @@
   --t-2xs: 10px; --t-xs: 11px; --t-sm: 12px; --t-base: 13px;
   --t-md: 14px;  --t-lg: 16px; --t-xl: 18px; --t-2xl: 26px; --t-3xl: 28px;
 
-  /* ---- Radii. Four steps: cells, controls, cards, pills. ---- */
-  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-pill: 100px;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.45);
-  --shadow:    0 6px 24px -6px rgba(0,0,0,0.55);
+  /* ---- Radii. Trading terminals are near-square: corners are chrome, and
+     chrome competes with data. Four steps, all small. ---- */
+  --r-xs: 2px; --r-sm: 3px; --r-md: 4px; --r-pill: 3px;
+  --shadow-sm: none;
+  --shadow:    none;
   --shadow-lg: 0 16px 48px -12px rgba(0,0,0,0.65);
+
+  /* Every number in the app renders in this stack. Tabular figures mean a
+     price column does not jiggle sideways when 9 becomes 11. */
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 *{box-sizing:border-box;margin:0;}
 html{color-scheme:dark;}
-body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,sans-serif;font-size:var(--t-base);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;position:relative;min-height:100vh;}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:var(--t-base);line-height:1.45;-webkit-font-smoothing:antialiased;position:relative;min-height:100vh;}
 
-/* Signature "terminal" backdrop: a faint grid that fades out downward, plus a
-   soft electric-blue glow up top. Fixed so it never scrolls. */
-body::before{content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
-  background-image:linear-gradient(rgba(255,255,255,0.016) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,0.016) 1px,transparent 1px);
-  background-size:46px 46px;
-  /* starts below the chrome so it never sits behind the tab row */
-  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 96px,#000 200px,transparent 70%);
-  mask-image:linear-gradient(to bottom,transparent 0,transparent 96px,#000 200px,transparent 70%);
-  opacity:.6;}
-body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-50%);
-  width:1100px;height:620px;z-index:-2;pointer-events:none;
-  background:radial-gradient(ellipse at center,rgba(76,123,243,0.11),transparent 68%);}
+/* No backdrop grid, no glow. An earlier version had both. On a page whose
+   entire job is reading numbers off charts and tables, decoration behind the
+   data is noise competing with signal: every real terminal (TradingView,
+   QuantConnect, Eikon) renders onto a flat surface for exactly this reason. */
 
 /* Custom scrollbars — thin, on-brand. */
 *::-webkit-scrollbar{width:10px;height:10px;}
@@ -75,76 +70,80 @@ body::after{content:'';position:fixed;top:-260px;left:50%;transform:translateX(-
 ::selection{background:rgba(76,123,243,0.32);color:#fff;}
 
 /* ---- Topbar (glass, sticky) ---- */
-.topbar{height:56px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:2px;
-  border-bottom:1px solid var(--border);padding:0 18px;
-  background:var(--bg);}
+.topbar{height:40px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:0;
+  border-bottom:1px solid var(--border);padding:0 12px;
+  background:var(--bg2);}
 h1.brand{margin:0;}
-.brand{display:flex;align-items:center;gap:10px;font-size:var(--t-lg);font-weight:650;letter-spacing:-0.02em;padding-right:20px;margin-right:10px;flex-shrink:0;border-right:1px solid var(--border);height:26px;}
-.brand .mark{width:26px;height:26px;flex-shrink:0;border-radius:var(--r-sm);
-  background:linear-gradient(145deg,#1d2c52,#0d1220);border:1px solid var(--border2);
-  display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px -2px var(--accent-glow),inset 0 1px 0 rgba(255,255,255,0.06);}
-.brand .word{background:linear-gradient(180deg,#ffffff,#b6c2db);-webkit-background-clip:text;background-clip:text;color:transparent;}
-.tabnav{display:flex;gap:2px;}
-.tabbtn{position:relative;height:56px;padding:0 15px;background:transparent;border:none;box-shadow:none;color:var(--muted);font-size:var(--t-base);font-weight:520;cursor:pointer;transition:color 0.15s,background 0.15s;font-family:inherit;border-radius:var(--r-sm) var(--r-sm) 0 0;}
-.tabbtn:hover{color:var(--text);background:rgba(255,255,255,0.035);}
+.brand{display:flex;align-items:center;gap:7px;font-size:var(--t-md);font-weight:700;letter-spacing:-0.01em;padding-right:12px;margin-right:6px;flex-shrink:0;border-right:1px solid var(--border);height:22px;color:var(--text);}
+.brand .mark{width:20px;height:20px;flex-shrink:0;border-radius:var(--r-xs);
+  background:var(--surface3);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;}
+.tabnav{display:flex;gap:0;}
+/* Tabs read as a terminal's function row: small, uppercase, tracked out, with
+   a 2px underline on the active one and no fill anywhere. */
+.tabbtn{position:relative;height:40px;padding:0 13px;background:transparent;border:none;box-shadow:none;color:var(--muted);font-size:var(--t-xs);font-weight:600;letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;transition:color 0.12s;font-family:inherit;border-radius:0;}
+.tabbtn:hover{color:var(--text2);}
 .tabbtn.active{color:var(--text);}
-.tabbtn.active::after{content:'';position:absolute;left:11px;right:11px;bottom:-1px;height:2px;border-radius:var(--r-xs);background:linear-gradient(90deg,var(--accent),var(--accentH));box-shadow:0 0 12px var(--accent-glow);}
-.topbar-tag{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:var(--t-xs);font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text2);
-  background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-pill);padding:5px 12px;font-family:'JetBrains Mono',monospace;}
-.topbar-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);}
+.tabbtn.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);}
+.topbar-tag{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:var(--t-2xs);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);
+  background:transparent;border:none;padding:0;font-family:var(--mono);}
+.topbar-tag::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--green);}
 
 /* ---- Ticker bar ---- */
-.ticker-bar{border-bottom:1px solid var(--border);padding:0 24px;height:38px;display:flex;align-items:center;gap:18px;font-size:var(--t-sm);font-family:'JetBrains Mono',monospace;color:var(--text2);background:rgba(11,14,21,0.5);}
+.ticker-bar{border-bottom:1px solid var(--border);padding:0 12px;height:26px;display:flex;align-items:center;gap:16px;font-size:var(--t-2xs);font-family:var(--mono);letter-spacing:0.04em;color:var(--muted);background:var(--bg);font-variant-numeric:tabular-nums;}
 
 /* ---- Page wrapper ---- */
-.page{max-width:1220px;margin:0 auto;padding:0 24px;}
+.page{max-width:1540px;margin:0 auto;padding:0 12px;}
 
 /* ---- Banner ---- */
-.banner{display:none;background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid var(--border2);border-left:3px solid var(--amber);color:var(--text);padding:12px 16px;font-size:var(--t-base);margin:0;border-radius:var(--r-sm);}
+.banner{display:none;background:var(--surface);border:1px solid var(--border2);border-left:2px solid var(--amber);color:var(--text);padding:8px 12px;font-size:var(--t-sm);margin:0;border-radius:var(--r-sm);}
 
 /* ---- Cards ---- */
-.card{position:relative;background:linear-gradient(180deg,var(--surface),#0c1017);border:1px solid var(--border);border-radius:var(--r-md);padding:18px;box-shadow:var(--shadow-sm);transition:border-color 0.2s,box-shadow 0.2s;}
-.card:hover{border-color:var(--border2);box-shadow:var(--shadow);}
-.card::before{content:'';position:absolute;top:0;left:14px;right:14px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.07),transparent);pointer-events:none;}
+/* Flat panel, 1px border, no gradient and no hover lift. A card that animates
+   when the mouse passes over it is a card asking to be looked at; these are
+   containers, and the contents are the thing worth looking at. */
+.card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:12px;}
 
 /* ---- Inputs / selects ---- */
 /* :not(checkbox/radio) so a checkbox added outside .feat-toggle does not render
    as a full-width 34px box. */
-input:not([type="checkbox"]):not([type="radio"]),select,textarea{height:34px;padding:0 11px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);font-size:var(--t-base);width:100%;box-sizing:border-box;font-family:inherit;transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;}
+input:not([type="checkbox"]):not([type="radio"]),select,textarea{height:28px;padding:0 8px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);font-size:var(--t-sm);width:100%;box-sizing:border-box;font-family:inherit;transition:border-color 0.12s;}
 input:hover,select:hover,textarea:hover{border-color:#333e57;}
-textarea{height:auto;padding:9px 11px;resize:vertical;line-height:1.6;}
+textarea{height:auto;padding:7px 8px;resize:vertical;line-height:1.55;}
 input::placeholder,textarea::placeholder{color:var(--muted);}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px var(--accent-soft);}
-input[type="number"],input[type="date"]{font-variant-numeric:tabular-nums;}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--bg);box-shadow:0 0 0 2px var(--accent-soft);}
+/* Any field holding a number gets the mono stack and fixed-width figures, so
+   typed values line up with the rendered ones in the tables below. */
+input[type="number"],input[type="date"]{font-family:var(--mono);font-variant-numeric:tabular-nums;}
 
 /* ---- Buttons ---- */
-button{height:34px;padding:0 16px;background:linear-gradient(180deg,var(--accentH),var(--accent));border:1px solid rgba(76,123,243,0.55);border-radius:var(--r-sm);color:#fff;font-size:var(--t-base);font-weight:550;cursor:pointer;transition:filter 0.15s,box-shadow 0.15s,transform 0.06s;font-family:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,0.18),0 2px 10px -3px var(--accent-glow);}
-button:hover{filter:brightness(1.08);box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),0 5px 16px -3px var(--accent-glow);}
-button:active{transform:translateY(1px);}
-button:disabled{opacity:.5;cursor:wait;filter:none;}
-button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 10px -3px var(--accent-glow);}
+button{height:28px;padding:0 12px;background:var(--accent);border:1px solid var(--accent);border-radius:var(--r-sm);color:#fff;font-size:var(--t-sm);font-weight:600;cursor:pointer;transition:background 0.12s;font-family:inherit;box-shadow:none;}
+button:hover{background:var(--accentH);border-color:var(--accentH);}
+button:disabled{opacity:.45;cursor:wait;}
+button:focus-visible{outline:2px solid var(--accentH);outline-offset:1px;}
 .ghost{background:var(--surface2);border:1px solid var(--border2);color:var(--text);box-shadow:none;}
-.ghost:hover{background:var(--surface3);filter:none;border-color:#38445e;box-shadow:none;}
-.ghost-sm{height:24px;padding:0 8px;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:var(--t-sm);font-weight:500;border-radius:var(--r-sm);cursor:pointer;font-family:inherit;box-shadow:none;}
+.ghost:hover{background:var(--surface3);border-color:#38445e;box-shadow:none;}
+.ghost-sm{height:22px;padding:0 7px;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:var(--t-xs);font-weight:500;border-radius:var(--r-sm);cursor:pointer;font-family:inherit;box-shadow:none;}
 .ghost-sm:hover{color:var(--red);border-color:var(--red);filter:none;background:rgba(239,68,68,0.08);box-shadow:none;}
 
 /* ---- Section label ---- */
-.label{font-size:var(--t-xs);font-weight:600;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin:0 0 14px;display:flex;align-items:center;gap:8px;}
-.label::before{content:'';width:3px;height:11px;border-radius:var(--r-xs);background:linear-gradient(180deg,var(--accent),var(--accentH));box-shadow:0 0 8px var(--accent-glow);}
+/* Section headers sit on a hairline that runs the full width of the panel,
+   the way a terminal separates panes. No glowing accent bar. */
+.label{font-size:var(--t-2xs);font-weight:600;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-family:var(--mono);}
 
 /* ---- Tab panels ---- */
 .tab-panel{display:none;}
 
 /* ---- Sidebar layout ---- */
-.tab-body{display:grid;grid-template-columns:252px 1fr;gap:24px;padding:24px 0;align-items:start;}
-.sidebar{display:flex;flex-direction:column;gap:12px;}
-.sidebar .card{padding:16px;}
-.main-col{display:flex;flex-direction:column;gap:20px;min-width:0;}
+.tab-body{display:grid;grid-template-columns:260px 1fr;gap:10px;padding:10px 0;align-items:start;}
+.sidebar{display:flex;flex-direction:column;gap:8px;}
+.sidebar .card{padding:10px;}
+.main-col{display:flex;flex-direction:column;gap:10px;min-width:0;}
 
 /* ---- Arena layout ---- */
-.arena-body{display:grid;grid-template-columns:1fr 360px;gap:20px;padding:20px 0;align-items:start;}
-.arena-main{display:flex;flex-direction:column;gap:16px;min-width:0;}
-.arena-side{display:flex;flex-direction:column;gap:12px;}
+.arena-body{display:grid;grid-template-columns:1fr 340px;gap:10px;padding:10px 0;align-items:start;}
+.arena-main{display:flex;flex-direction:column;gap:10px;min-width:0;}
+.arena-side{display:flex;flex-direction:column;gap:8px;}
 
 /* ---- Chart boxes ---- */
 .chart-box{position:relative;}
@@ -157,12 +156,12 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .seg button{height:26px;padding:0 12px;background:transparent;border:none;box-shadow:none;border-radius:0;color:var(--muted);font-size:var(--t-sm);font-weight:500;}
 .seg button.active{background:var(--surface2);color:var(--text);}
 .seg button:hover{color:var(--text);}
-.candle-legend{display:flex;gap:14px;font-size:var(--t-xs);color:var(--muted);align-items:center;font-family:'JetBrains Mono',monospace;}
+.candle-legend{display:flex;gap:14px;font-size:var(--t-xs);color:var(--muted);align-items:center;font-family:var(--mono);}
 .candle-legend span::before{content:'';display:inline-block;width:9px;height:9px;border-radius:var(--r-xs);margin-right:5px;vertical-align:-1px;}
 .candle-legend .up::before{background:var(--green);}
 .candle-legend .down::before{background:var(--red);}
 .vol-box{height:62px;margin-top:4px;}
-.vol-label{font-size:var(--t-2xs);color:var(--faint);text-transform:uppercase;letter-spacing:0.06em;margin-top:6px;}
+.vol-label{font-size:var(--t-2xs);color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.06em;margin-top:6px;}
 .corr-note{font-size:var(--t-sm);color:var(--muted);margin-bottom:12px;}
 
 /* ---- AI strategy composer ---- */
@@ -173,17 +172,17 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .ai-rules{margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);display:none;}
 .ai-ok{display:flex;align-items:center;gap:6px;font-size:var(--t-sm);color:var(--green);font-weight:600;margin-bottom:10px;}
 .ai-rule{display:flex;gap:8px;align-items:baseline;margin-bottom:7px;}
-.ai-rule .rtag{flex:0 0 auto;width:34px;font-family:'JetBrains Mono',monospace;font-size:var(--t-2xs);font-weight:600;letter-spacing:0.04em;padding-top:2px;}
+.ai-rule .rtag{flex:0 0 auto;width:34px;font-family:var(--mono);font-size:var(--t-2xs);font-weight:600;letter-spacing:0.04em;padding-top:2px;}
 .ai-rule .rtag.buy{color:var(--green);} .ai-rule .rtag.sell{color:var(--red);}
-.ai-rule code{flex:1;font-family:'JetBrains Mono',monospace;font-size:var(--t-sm);color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 9px;line-height:1.5;word-break:break-word;}
+.ai-rule code{flex:1;font-family:var(--mono);font-size:var(--t-sm);color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 9px;line-height:1.5;word-break:break-word;}
 
 /* ---- Leaderboard table ---- */
-.lb-table{width:100%;border-collapse:collapse;font-size:var(--t-base);}
-.lb-table thead th{font-size:var(--t-2xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+.lb-table{width:100%;border-collapse:collapse;font-size:var(--t-sm);}
+.lb-table thead th{font-size:var(--t-2xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;padding:5px 8px;font-family:var(--mono);border-bottom:1px solid var(--border);white-space:nowrap;}
 .lb-table tbody tr{border-bottom:1px solid var(--border);transition:background 0.1s;}
 .lb-table tbody tr:hover{background:var(--surface2);}
-.lb-table tbody td{padding:9px 10px;color:var(--text);vertical-align:middle;font-variant-numeric:tabular-nums;}
-.rank-badge{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--t-2xs);font-weight:700;}
+.lb-table tbody td{padding:5px 8px;color:var(--text);vertical-align:middle;font-variant-numeric:tabular-nums;}
+.rank-badge{width:18px;height:18px;border-radius:var(--r-xs);display:inline-flex;align-items:center;justify-content:center;font-size:var(--t-2xs);font-weight:700;}
 .rank-1{background:var(--gold);color:#000;}
 /* --faint as a badge background put rank 2/3 text at ~2.2:1, effectively
    unreadable. Use a real surface with full-strength text instead. */
@@ -193,11 +192,16 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .pos-long{background:rgba(34,197,94,0.15);color:var(--green);}
 .pos-cash{background:rgba(90,100,128,0.2);color:var(--muted);}
 
-/* ---- Metric cards (dl/dt/dd) ---- */
-.metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;}
-.metric{background:var(--surface2);border-radius:var(--r-sm);padding:12px;}
-.metric dt{font-size:var(--t-xs);color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;}
-.metric dd{font-size:var(--t-xl);font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);margin:0;font-family:'JetBrains Mono',monospace;}
+/* ---- Metric readouts (dl/dt/dd) ----
+   A KPI strip, not a grid of tiles: value first in mono, tiny label under it,
+   cells divided by hairlines. This is the pattern every backtest report uses
+   (QuantConnect's results header is the clearest example) because it packs
+   ten figures into one scannable band instead of ten boxes you have to
+   saccade between. Collapses to a 2-up grid on narrow screens. */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:0;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg2);overflow:hidden;}
+.metric{padding:8px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:transparent;border-radius:0;}
+.metric dd{font-size:var(--t-lg);font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);margin:0 0 2px;font-family:var(--mono);line-height:1.2;letter-spacing:-0.02em;}
+.metric dt{font-size:var(--t-2xs);color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;font-weight:500;}
 .metric dd.pos{color:var(--green);}
 .metric dd.neg{color:var(--red);}
 
@@ -207,20 +211,20 @@ button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft),0 2px 
 .error{color:var(--red);font-size:var(--t-base);display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--r-sm);padding:8px 12px;margin-top:8px;}
 
 /* ---- Arena day pill ---- */
-.day-pill{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 16px;font-size:var(--t-base);font-weight:500;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:8px;}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+.day-pill{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-sm);padding:4px 10px;font-size:var(--t-xs);font-weight:500;font-family:var(--mono);font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:8px;}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
 .day-pill.offline .dot{background:var(--amber);}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 #arenaMsg{display:none;text-align:center;color:var(--muted);font-size:var(--t-base);padding:32px 20px;line-height:1.8;}
 
 /* ---- Chips ---- */
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
-.chip{height:28px;padding:0 12px;background:var(--surface2);border:1px solid var(--border);box-shadow:none;color:var(--accent);font-size:var(--t-sm);font-weight:600;font-family:'JetBrains Mono',monospace;border-radius:var(--r-pill);cursor:pointer;transition:border-color 0.15s,background 0.15s;}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+.chip{height:22px;padding:0 7px;background:var(--bg2);border:1px solid var(--border);box-shadow:none;color:var(--accentH);font-size:var(--t-xs);font-weight:500;font-family:var(--mono);border-radius:var(--r-pill);cursor:pointer;transition:border-color 0.15s,background 0.15s;}
 .chip:hover{border-color:var(--accent);background:rgba(76,123,243,0.12);}
 
 /* ---- Emoji picker ---- */
-.emoji-row{display:flex;flex-wrap:wrap;gap:6px;}
-.emoji-btn{height:36px;width:40px;background:var(--surface2);border:1px solid var(--border);box-shadow:none;font-size:var(--t-lg);border-radius:var(--r-sm);padding:0;cursor:pointer;}
+.emoji-row{display:flex;flex-wrap:wrap;gap:4px;}
+.emoji-btn{height:28px;width:30px;background:var(--surface2);border:1px solid var(--border);box-shadow:none;font-size:var(--t-md);border-radius:var(--r-sm);padding:0;cursor:pointer;}
 .emoji-btn:hover{border-color:var(--border2);}
 .emoji-btn.selected{border-color:var(--accent);background:rgba(76,123,243,0.12);}
 
@@ -237,7 +241,7 @@ details.cheat summary::-webkit-details-marker{display:none;}
 details.cheat .chev{transition:transform 0.15s;}
 details.cheat[open] .chev{transform:rotate(90deg);}
 details.cheat .body{margin-top:12px;font-size:var(--t-base);color:var(--text);line-height:1.8;}
-details.cheat code{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-xs);padding:1px 6px;font-size:var(--t-sm);font-family:'JetBrains Mono',monospace;}
+details.cheat code{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-xs);padding:1px 6px;font-size:var(--t-sm);font-family:var(--mono);}
 /* Real <button> for keyboard access, styled back down to inline text so the
    cheat sheet still reads as prose. */
 .copy-ex{display:inline;height:auto;padding:0;background:none;border:none;box-shadow:none;
@@ -251,32 +255,33 @@ details.cheat code{background:var(--surface2);border:1px solid var(--border);bor
 
 /* ---- Generic tables (analysis) ---- */
 table{width:100%;border-collapse:collapse;font-size:var(--t-base);}
-th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;}
-th{color:var(--muted);font-weight:600;font-size:var(--t-xs);text-transform:uppercase;letter-spacing:0.06em;position:sticky;top:0;background:var(--surface);}
+th,td{text-align:left;padding:5px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;}
+td{font-family:var(--mono);font-size:var(--t-sm);}
+th{color:var(--muted);font-weight:600;font-size:var(--t-2xs);text-transform:uppercase;letter-spacing:0.07em;position:sticky;top:0;background:var(--surface);font-family:var(--mono);}
 tbody tr:hover{background:var(--surface2);}
 
 /* ---- Heatmap ---- */
 .heatmap-table{width:auto;}
-.heatmap-table th,.heatmap-table td{text-align:center;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+.heatmap-table th,.heatmap-table td{text-align:center;padding:8px 12px;font-family:var(--mono);font-variant-numeric:tabular-nums;}
 .heatmap-table th:first-child,.heatmap-table td:first-child{text-align:right;color:var(--muted);font-family:inherit;font-weight:600;}
 .heatmap-cell{border-radius:var(--r-xs);font-weight:600;}
 .heatmap-cell.best{outline:2px solid var(--text);outline-offset:-2px;}
 .heatmap-corner{color:var(--muted);font-size:var(--t-xs);text-transform:uppercase;letter-spacing:0.06em;}
-.note{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--r-md);padding:12px 16px;font-size:var(--t-base);color:var(--text);margin-bottom:16px;line-height:1.6;}
-.grid-field input.values{width:100%;min-width:200px;font-family:'JetBrains Mono',monospace;font-size:var(--t-base);}
+.note{background:var(--surface2);border:1px solid var(--border);border-left:2px solid var(--accent);border-radius:var(--r-sm);padding:8px 12px;font-size:var(--t-sm);color:var(--text2);margin-bottom:10px;line-height:1.55;}
+.grid-field input.values{width:100%;min-width:200px;font-family:var(--mono);font-size:var(--t-base);}
 .field{display:flex;flex-direction:column;gap:4px;}
-.field label,.group-label{display:block;font-size:var(--t-xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
-.controls{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;}
+.field label,.group-label{display:block;font-size:var(--t-2xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;}
 h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;}
 .sub{color:var(--muted);font-size:var(--t-base);line-height:1.6;}
-.rule-input{width:100%;font-family:'JetBrains Mono',monospace;font-size:var(--t-base);}
+.rule-input{width:100%;font-family:var(--mono);font-size:var(--t-base);}
 .w-90{width:90px;} .w-110{width:110px;} .w-150{width:150px;} .w-180{width:180px;}
 .grow{flex:1;} .mt-0{margin:0;}
 
 /* ---- Regime ---- */
 .regime-strip-wrap{margin-top:8px;border-radius:var(--r-xs);overflow:hidden;}
 #regimeStrip{display:block;width:100%;height:18px;}
-.regime-label{font-size:var(--t-3xl);font-weight:700;letter-spacing:-0.02em;font-family:'JetBrains Mono',monospace;margin-bottom:16px;}
+.regime-label{font-size:var(--t-3xl);font-weight:700;letter-spacing:-0.02em;font-family:var(--mono);margin-bottom:16px;}
 .regime-label.TRENDING{color:var(--accent);}
 .regime-label.MEAN_REVERTING{color:var(--green);}
 .regime-label.HIGH_VOLATILITY{color:var(--red);}
@@ -292,16 +297,16 @@ h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;t
 .attrib-list{margin-top:16px;}
 .attrib-item{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--border);font-size:var(--t-base);}
 .attrib-item:last-child{border-bottom:none;}
-.attrib-feat{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
+.attrib-feat{color:var(--text);font-family:var(--mono);font-weight:600;}
 .attrib-reason{color:var(--muted);flex:1;margin:0 12px;}
-.attrib-z{color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap;}
+.attrib-z{color:var(--muted);font-family:var(--mono);white-space:nowrap;}
 .feat-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
 .feat-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:var(--t-base);}
 .feat-toggle input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px;min-width:14px;padding:0;border:none;}
 .feat-swatch{display:inline-block;width:18px;height:3px;border-radius:var(--r-xs);}
 .regime-separator{border:none;border-top:1px solid var(--border);margin:32px 0 24px;}
 #regGatedResults{display:none;}
-.regime-interp{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:var(--r-md);padding:12px 16px;font-size:var(--t-base);color:var(--text);margin-bottom:16px;line-height:1.6;}
+.regime-interp{background:var(--surface2);border:1px solid var(--border);border-left:2px solid var(--green);border-radius:var(--r-sm);padding:8px 12px;font-size:var(--t-sm);color:var(--text2);margin-bottom:10px;line-height:1.55;}
 #regCountCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:16px;}
 
 /* ---- Regime attribution bars ---- */
@@ -333,7 +338,7 @@ h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;t
 .text-sm{font-size:var(--t-sm);}
 .text-xs{font-size:var(--t-xs);}
 .muted{color:var(--muted);}
-.num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;}
 /* Chart frames: fixed heights belong to a named size, not a magic number. */
 .chart-sm{height:160px;} .chart-md{height:280px;} .chart-lg{height:320px;}
 
@@ -608,7 +613,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <div class="vol-label">Volume · ▲ buy ▼ sell</div>
       </div>
       <div class="card">
-        <h2>Equity curve : strategy vs. buy &amp; hold</h2>
+        <h2>Equity · strategy vs buy &amp; hold</h2>
         <div class="chart-box chart-md"><canvas id="equityChart"></canvas></div>
       </div>
       <div class="card">
@@ -951,10 +956,14 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         arrival price, split into what the traded shares cost and the opportunity cost of
         the shares that never filled. Positive always means worse for the trader.
       </p>
-      <dl class="metrics-grid" id="exMetrics"></dl>
-      <div class="chart-box chart-md mt-4"><canvas id="exChart"></canvas></div>
-      <div class="vol-label">Mid price over the working period</div>
-      <div id="exCompare" class="mt-4"></div>
+      <!-- Single-run view; hidden while a comparison is showing so it does not
+           leave an empty chart frame above the table. -->
+      <div id="exSingle">
+        <dl class="metrics-grid" id="exMetrics"></dl>
+        <div class="chart-box chart-md mt-4"><canvas id="exChart"></canvas></div>
+        <div class="vol-label">Mid price over the working period</div>
+      </div>
+      <div id="exCompare"></div>
     </div>
 
     <div class="card" id="agCard">
@@ -1073,7 +1082,7 @@ function wireValidation(buyInput, sellInput, statusEl) {
       else { statusEl.textContent = '✗ ' + (v.error || 'Invalid rules'); statusEl.className = 'rule-status bad'; }
     } catch {
       if (mySeq !== seq) return;
-      statusEl.textContent = 'Validator unreachable — will check on submit.';
+      statusEl.textContent = 'Validator unreachable. Will check on submit.';
       statusEl.className = 'rule-status wait';
     }
   }
@@ -1107,9 +1116,45 @@ function debouncedTickerInfo(ticker) {
   tickerInfoTimer = setTimeout(() => fetchTickerInfo(ticker), 400);
 }
 
+// Number formatting for every readout. Fixed decimals, explicit sign on
+// changes, and a real minus sign (U+2212, same width as + in tabular mono),
+// so a column of figures lines up on the decimal point.
+const MINUS = '\u2212';
+function fNum(v, dp = 2, signed = false) {
+  if (v == null || !isFinite(v)) return '\u2014';
+  const s = Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
+  return (v < 0 ? MINUS : (signed && v > 0 ? '+' : '')) + s;
+}
+const fPct   = (v, dp = 2) => fNum(v, dp, true) + '%';
+const fMoney = v => (v < 0 ? MINUS : '') + '$' + fNum(Math.abs(v), 2);
+// Colour carries exactly one meaning: the sign. Green is money made, red is
+// money lost. "Sharpe under 1" or "lagged buy and hold" are judgments, and
+// painting them red makes a profitable result read as a loss.
+const sgnCls = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+
 // Build metric card HTML using dl/dt/dd.
 function makeMCard(name, val, cls) {
   return '<div class="metric"><dt>' + name + '</dt><dd class="' + (cls || '') + '">' + val + '</dd></div>';
+}
+
+// The standard backtest readout, shared by Lab, walk-forward and the
+// regime-gated run so they cannot drift apart again (they had: three copies,
+// each colouring Sharpe < 1 red). `extra` appends tab-specific cells.
+function backtestCards(m, returnLabel = 'Return', extra = []) {
+  const excess = m.total_return_pct - m.buy_hold_return_pct;
+  return [
+    makeMCard(returnLabel,    fPct(m.total_return_pct),    sgnCls(m.total_return_pct)),
+    makeMCard('Buy & hold',   fPct(m.buy_hold_return_pct), sgnCls(m.buy_hold_return_pct)),
+    makeMCard('vs B&H',       fPct(excess),                sgnCls(excess)),
+    makeMCard('CAGR',         fPct(m.cagr_pct),            sgnCls(m.cagr_pct)),
+    makeMCard('Sharpe',       fNum(m.sharpe),              sgnCls(m.sharpe)),
+    makeMCard('Sortino',      fNum(m.sortino),             sgnCls(m.sortino)),
+    makeMCard('Max DD',       fPct(-Math.abs(m.max_drawdown_pct)), 'neg'),
+    makeMCard('Calmar',       fNum(m.calmar_ratio),        sgnCls(m.calmar_ratio)),
+    ...(m.win_rate_pct != null ? [makeMCard('Win rate', fNum(m.win_rate_pct, 1) + '%', '')] : []),
+    ...extra,
+    makeMCard('Final equity', fMoney(m.final_equity),      ''),
+  ].join('');
 }
 
 // Escape HTML for user-supplied strings rendered into innerHTML.
@@ -1127,30 +1172,54 @@ function escHtml(s) {
 // missing its charts.
 const HAS_CHARTS = typeof Chart !== 'undefined';
 if (HAS_CHARTS) {
-  Chart.defaults.font.family = "'Manrope', system-ui, sans-serif";
-  Chart.defaults.font.size = 11;
+  // Axis numbers in mono with tabular figures, the way every charting
+  // terminal renders its price scale, so tick labels line up digit for digit.
+  Chart.defaults.font.family = "'JetBrains Mono', ui-monospace, monospace";
+  Chart.defaults.font.size = 10;
 } else {
-  console.warn('Chart.js failed to load — charts disabled, rest of the app still works.');
+  console.warn('Chart.js failed to load; charts disabled, rest of the app still works.');
 }
 
 // Chart defaults — every new Chart() call merges or spreads these.
 const CHART_DEFAULTS = {
-  responsive: true, maintainAspectRatio: false, animation: {duration: 250},
+  responsive: true, maintainAspectRatio: false, animation: {duration: 200},
+  // Hovering anywhere in a column reads every series at that date, instead of
+  // making you hunt for a 3px point: the crosshair behaviour traders expect.
+  interaction: {mode: 'index', intersect: false},
   plugins: {
     legend: {display: false},
     tooltip: {
       backgroundColor: TOKENS.surface2, borderColor: TOKENS.border2, borderWidth: 1,
-      padding: {x: 12, y: 8}, titleColor: TOKENS.text, bodyColor: TOKENS.text2,
-      titleFont: {size: 12, weight: '500'}, bodyFont: {size: 11},
+      cornerRadius: 2, padding: {x: 8, y: 6}, titleColor: TOKENS.text, bodyColor: TOKENS.text2,
+      titleFont: {size: 11, weight: '600'}, bodyFont: {size: 10}, boxPadding: 4,
     }
   },
+  // Value scale on the right, as on TradingView and most terminals: the eye
+  // reads the latest bar and its price in the same glance.
   scales: {
-    x: {grid: {display: false}, ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 8}, border: {display: false}},
-    y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: TOKENS.muted, font: {size: 11}, maxTicksLimit: 6}, border: {display: false}}
+    x: {grid: {color: 'rgba(255,255,255,0.025)'}, ticks: {color: TOKENS.muted, font: {size: 10}, maxTicksLimit: 8, maxRotation: 0}, border: {display: false}},
+    y: {position: 'right', grid: {color: 'rgba(255,255,255,0.035)'}, ticks: {color: TOKENS.muted, font: {size: 10}, maxTicksLimit: 6}, border: {display: false}}
   }
 };
 
 // Deep-merge overrides into a fresh copy of CHART_DEFAULTS.
+// ISO dates on a category axis -> short terminal-style labels. Five years of
+// "2020-01-02" side by side is unreadable; "Jan '20" is how every charting
+// package labels a multi-year axis. Short spans keep the day ("Mar 14").
+// Non-date labels (sim steps, parameter values) pass through untouched.
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dateTick(value) {
+  const lab = this.getLabelForValue(value);
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(lab);
+  if (!m) return lab;
+  const mon = MONTHS[+m[2] - 1];
+  return this.chart.data.labels.length > 130 ? mon + " '" + m[1].slice(2) : mon + ' ' + (+m[3]);
+}
+
+// Shared legend: hairline swatches in small type. A legend should never be
+// louder than the axis it annotates.
+const LEGEND_LABELS = {color: TOKENS.text2, boxWidth: 12, boxHeight: 2, font: {size: 10}, padding: 14};
+
 function chartOpts(overrides) {
   const base = JSON.parse(JSON.stringify(CHART_DEFAULTS));
   function merge(a, b) {
@@ -1161,6 +1230,13 @@ function chartOpts(overrides) {
     }
   }
   if (overrides) merge(base, overrides);
+  // Functions do not survive the JSON clone above, so the tick formatter is
+  // attached here, after the merge, unless a chart supplied its own.
+  const xt = base.scales && base.scales.x && base.scales.x.ticks;
+  if (xt && !xt.callback && base.scales.x.type !== 'linear') {
+    xt.callback = dateTick;
+    xt.autoSkipPadding = 18;
+  }
   return base;
 }
 
@@ -1381,7 +1457,7 @@ function updateArenaPrice(state) {
   const panel = document.getElementById('arenaPricePanel');
   if (!state.ohlc || !state.ohlc.length) { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
-  document.getElementById('arenaPriceTitle').textContent = state.ticker + ' — price';
+  document.getElementById('arenaPriceTitle').textContent = state.ticker + ' \u00b7 price';
   const candles = state.ohlc, labels = state.dates, vol = state.volume || [];
 
   // Rebuild on a new season (ticker change) or if our chart somehow has more
@@ -1422,7 +1498,7 @@ function makeArenaChart() {
       animation: false,
       interaction: {mode: 'index', intersect: false},
       plugins: {
-        legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}},
+        legend: {display: true, labels: LEGEND_LABELS},
         tooltip: {callbacks: {label: ctx => ctx.dataset.label + ': $' +
           Number(ctx.parsed.y).toLocaleString(undefined, {maximumFractionDigits: 0})}}
       },
@@ -1656,7 +1732,7 @@ async function runBacktest() {
     // a failure here (clicking Run before /api/strategies resolves) escaped
     // before `finally` and left the button disabled until a page reload.
     const s = strategies.find(x => x.id === document.getElementById('strategy').value);
-    if (!s) throw new Error('Strategies are still loading — try again in a moment.');
+    if (!s) throw new Error('Strategies are still loading. Try again in a moment.');
     let params = {};
     if (s.id === 'custom') {
       params = {buy_rule:  document.getElementById('labBuy').value.trim(),
@@ -1774,25 +1850,13 @@ function render(r) {
   document.getElementById('labPlaceholder').style.display = 'none';
   document.getElementById('sampleBanner').style.display  = r.data_source === 'sample' ? 'block' : 'none';
 
-  const m    = r.metrics;
-  const beat = m.total_return_pct >= m.buy_hold_return_pct;
-  document.getElementById('metricCards').innerHTML = [
-    makeMCard('Strategy return',  m.total_return_pct   + '%',        m.total_return_pct   >= 0 ? 'pos' : 'neg'),
-    makeMCard('Buy & hold',       m.buy_hold_return_pct + '%',       m.buy_hold_return_pct >= 0 ? 'pos' : 'neg'),
-    makeMCard('CAGR',             m.cagr_pct            + '%/yr',    m.cagr_pct            >= 0 ? 'pos' : 'neg'),
-    makeMCard('Sharpe',           m.sharpe,                           m.sharpe              >= 1 ? 'pos' : 'neg'),
-    makeMCard('Sortino',          m.sortino,                          m.sortino             >= 1 ? 'pos' : 'neg'),
-    makeMCard('Max drawdown',     m.max_drawdown_pct    + '%',       'neg'),
-    makeMCard('Calmar',           m.calmar_ratio,                     m.calmar_ratio        >= 1 ? 'pos' : 'neg'),
-    makeMCard('Win rate',         m.win_rate_pct        + '%',        m.win_rate_pct        >= 50 ? 'pos' : 'neg'),
-    makeMCard('Final equity',    '$' + m.final_equity.toLocaleString(), beat ? 'pos' : 'neg'),
-  ].join('');
+  document.getElementById('metricCards').innerHTML = backtestCards(r.metrics);
 
   // ---- Price candles + volume + buy/sell markers ----
   if (priceChart) { priceChart.destroy(); priceChart = null; }
   if (volChart)   { volChart.destroy();   volChart   = null; }
   if (r.ohlc && r.ohlc.length) {
-    document.getElementById('labPriceTitle').textContent = r.ticker + ' — price & trades';
+    document.getElementById('labPriceTitle').textContent = r.ticker + ' \u00b7 price & trades';
     labCandles = r.ohlc;
     labMarkers = tradeMarkers(r.trades, r.dates);
     priceChart = makePriceChart('priceChart', r.dates, labCandles, labMarkers, labPriceMode);
@@ -1802,7 +1866,7 @@ function render(r) {
   }
 
   const lineOpts = chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-    plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}});
+    plugins: {legend: {display: true, labels: LEGEND_LABELS}}});
 
   if (equityChart) equityChart.destroy();
   equityChart = new Chart(document.getElementById('equityChart'), {
@@ -1950,7 +2014,7 @@ function buildParamGrid(prefix) {
   // Without this guard a failed /api/strategies fetch surfaces to the user as
   // "Cannot read properties of undefined (reading 'params')".
   if (!s || !s.params || !s.params.length) {
-    throw new Error('Strategy list unavailable — reload the page and try again.');
+    throw new Error('Strategy list unavailable. Reload the page and try again.');
   }
   const p1 = s.params[0], p2 = s.params[1];
   const grid = {};
@@ -2070,19 +2134,10 @@ async function runWalkForward() {
 
 function renderWalkForward(r) {
   document.getElementById('wfResults').style.display = 'block';
-  const m = r.combined.metrics, beat = m.total_return_pct >= m.buy_hold_return_pct;
-  document.getElementById('wfMetricCards').innerHTML = [
-    makeMCard('OOS return',   m.total_return_pct    + '%',    m.total_return_pct    >= 0 ? 'pos' : 'neg'),
-    makeMCard('Buy & hold',   m.buy_hold_return_pct + '%',    m.buy_hold_return_pct >= 0 ? 'pos' : 'neg'),
-    makeMCard('CAGR',         m.cagr_pct            + '%/yr', m.cagr_pct            >= 0 ? 'pos' : 'neg'),
-    makeMCard('Sharpe',       m.sharpe,                        m.sharpe              >= 1 ? 'pos' : 'neg'),
-    makeMCard('Sortino',      m.sortino,                       m.sortino             >= 1 ? 'pos' : 'neg'),
-    makeMCard('Max drawdown', m.max_drawdown_pct    + '%',    'neg'),
-    makeMCard('Calmar',       m.calmar_ratio,                  m.calmar_ratio        >= 1 ? 'pos' : 'neg'),
-    makeMCard('Final equity','$' + m.final_equity.toLocaleString(), beat ? 'pos' : 'neg'),
-  ].join('');
+  const m = r.combined.metrics;
+  document.getElementById('wfMetricCards').innerHTML = backtestCards(m, 'OOS return');
   const lineOpts = chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-    plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}});
+    plugins: {legend: {display: true, labels: LEGEND_LABELS}}});
   if (wfChart) wfChart.destroy();
   wfChart = new Chart(document.getElementById('wfChart'), {
     type: 'line',
@@ -2131,11 +2186,11 @@ function renderMonteCarlo(r) {
   document.getElementById('mcResults').style.display = 'block';
   const o = r.original;
   document.getElementById('mcMetricCards').innerHTML = [
-    makeMCard('Final equity',       '$' + o.final_equity.toLocaleString(), ''),
-    makeMCard('Total return',       o.total_return_pct   + '%',  o.total_return_pct   >= 0 ? 'pos' : 'neg'),
-    makeMCard('Max drawdown',       o.max_drawdown_pct   + '%',  'neg'),
-    makeMCard('Prob. of loss',      r.prob_loss_pct      + '%',  r.prob_loss_pct      < 50 ? 'pos' : 'neg'),
-    makeMCard('Beats buy & hold',   r.prob_beat_buy_hold_pct + '%', r.prob_beat_buy_hold_pct >= 50 ? 'pos' : 'neg'),
+    makeMCard('Final equity',       fMoney(o.final_equity), ''),
+    makeMCard('Total return',       fPct(o.total_return_pct), sgnCls(o.total_return_pct)),
+    makeMCard('Max DD',             fPct(-Math.abs(o.max_drawdown_pct)), 'neg'),
+    makeMCard('P(loss)',            fNum(r.prob_loss_pct, 1) + '%', ''),
+    makeMCard('P(beat B&H)',        fNum(r.prob_beat_buy_hold_pct, 1) + '%', ''),
   ].join('');
   if (mcChart) mcChart.destroy();
   const b = r.bands;
@@ -2149,7 +2204,7 @@ function renderMonteCarlo(r) {
       {label: '5th percentile',  data: b.p5,  borderColor: 'rgba(76,123,243,0.35)', borderWidth: 1, pointRadius: 0, fill: false},
     ]},
     options: chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
+      plugins: {legend: {display: true, labels: LEGEND_LABELS}}}),
   });
 }
 
@@ -2175,7 +2230,7 @@ const REGIME_NAMES = {
 const FEAT_META = [
   {key: 'vol_20',      label: 'vol_20',      desc: 'Annualized volatility over 20 days',                       color: TOKENS.red},
   {key: 'trend_20',    label: 'trend_20',    desc: 'Directional slope of prices over 20 days (OLS fit)',        color: TOKENS.accent},
-  {key: 'autocorr_10', label: 'autocorr_10', desc: "Momentum persistence — do today's gains predict tomorrow's?", color: TOKENS.green},
+  {key: 'autocorr_10', label: 'autocorr_10', desc: "Momentum persistence: do today's gains predict tomorrow's?", color: TOKENS.green},
   {key: 'hurst',       label: 'hurst',       desc: 'Hurst exponent: >0.5 trending, <0.5 mean-reverting',       color: TOKENS.amber},
   {key: 'drawdown_20', label: 'drawdown_20', desc: 'Distance below the 20-day peak',                           color: '#a855f7'},
 ];
@@ -2345,7 +2400,7 @@ function renderFeatureChart(r) {
     return arr.map(v => (v == null || isNaN(v)) ? null : (range === 0 ? 0.5 : (v - lo) / range));
   }
   const datasets = FEAT_META.map(fm => ({
-    label: fm.key + ' — ' + fm.desc,
+    label: fm.key + ' \u00b7 ' + fm.desc,
     data:  normalize(feats[fm.key] || []),
     borderColor: fm.color, backgroundColor: 'transparent',
     borderWidth: 1.5, pointRadius: 0, tension: 0.2, hidden: false,
@@ -2360,7 +2415,7 @@ function renderFeatureChart(r) {
       scales: {y: {min: 0, max: 1, ticks: {callback: v => v.toFixed(1), color: TOKENS.muted, font: {size: 11}},
                    grid: {color: 'rgba(255,255,255,0.04)'}, border: {display: false}}},
       plugins: {tooltip: {callbacks: {label: ctx =>
-        ctx.dataset.label.split(' — ')[0] + ': ' +
+        ctx.dataset.label.split(' \u00b7 ')[0] + ': ' +
         (ctx.parsed.y == null ? 'N/A' : ctx.parsed.y.toFixed(3))}}},
     }),
   });
@@ -2432,22 +2487,14 @@ async function runRegimeBacktest() {
 
 function renderRegimeBacktest(r, filter) {
   document.getElementById('regGatedResults').style.display = 'block';
-  const m = r.metrics, beat = m.total_return_pct >= m.buy_hold_return_pct;
+  const m = r.metrics;
   const fracPct = r.regime_fraction_pct != null ? Number(r.regime_fraction_pct).toFixed(1) : '?';
   document.getElementById('regBtInterp').innerHTML =
     'This strategy was active <b>' + fracPct + '% of the time</b> ' +
     '(only when the market was <b>' + REGIME_NAMES[filter] + '</b>). ' +
     'The buy-and-hold baseline is always unfiltered.';
-  document.getElementById('regBtMetricCards').innerHTML = [
-    makeMCard('Strategy return',  m.total_return_pct    + '%',    m.total_return_pct    >= 0 ? 'pos' : 'neg'),
-    makeMCard('Buy & hold',       m.buy_hold_return_pct + '%',    m.buy_hold_return_pct >= 0 ? 'pos' : 'neg'),
-    makeMCard('CAGR',             m.cagr_pct            + '%/yr', m.cagr_pct            >= 0 ? 'pos' : 'neg'),
-    makeMCard('Sharpe',           m.sharpe,                        m.sharpe              >= 1 ? 'pos' : 'neg'),
-    makeMCard('Sortino',          m.sortino,                       m.sortino             >= 1 ? 'pos' : 'neg'),
-    makeMCard('Max drawdown',     m.max_drawdown_pct    + '%',    'neg'),
-    makeMCard('Active days',      fracPct               + '%',    ''),
-    makeMCard('Final equity',    '$' + m.final_equity.toLocaleString(), beat ? 'pos' : 'neg'),
-  ].join('');
+  document.getElementById('regBtMetricCards').innerHTML =
+    backtestCards(m, 'Return', [makeMCard('Active days', fracPct + '%', '')]);
   if (regBtChart) regBtChart.destroy();
   regBtChart = new Chart(document.getElementById('regBtChart'), {
     type: 'line',
@@ -2458,7 +2505,7 @@ function renderRegimeBacktest(r, filter) {
        borderColor: TOKENS.accent, borderWidth: 1.5, pointRadius: 0, borderDash: [6,4]},
     ]},
     options: chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
+      plugins: {legend: {display: true, labels: LEGEND_LABELS}}}),
   });
 }
 
@@ -2537,7 +2584,7 @@ function renderCompare(r) {
     type: 'line',
     data: {labels: r.dates, datasets},
     options: chartOpts({animation: false, interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
+      plugins: {legend: {display: true, labels: LEGEND_LABELS}}}),
   });
 
   document.getElementById('cmpTable').innerHTML =
@@ -2691,8 +2738,8 @@ async function runExecution(compare = false) {
     if (!res.ok) throw new Error((await res.json()).detail || 'Execution failed');
     const d = await res.json();
 
+    document.getElementById('exSingle').style.display = d.compare ? 'none' : 'block';
     if (d.compare) {
-      document.getElementById('exMetrics').innerHTML = '';
       if (exChart) { exChart.destroy(); exChart = null; }
       const rows = Object.entries(d.compare).map(([algo, r]) => {
         const t = r.tca;
@@ -2701,9 +2748,9 @@ async function runExecution(compare = false) {
           '<td class="ta-r num">' + (t.fill_rate * 100).toFixed(0) + '%</td>' +
           '<td class="ta-r num">' + Number(t.exec_vwap).toFixed(3) + '</td>' +
           '<td class="ta-r num ' + costClass(t.arrival_slippage_bps) + '">' +
-            Number(t.arrival_slippage_bps).toFixed(1) + '</td>' +
+            fNum(t.arrival_slippage_bps, 1, true) + '</td>' +
           '<td class="ta-r num ' + costClass(t.implementation_shortfall) + '">' +
-            Number(t.implementation_shortfall).toFixed(2) + '</td></tr>';
+            fNum(t.implementation_shortfall, 2, true) + '</td></tr>';
       }).join('');
       document.getElementById('exCompare').innerHTML =
         '<table class="lb-table"><thead><tr><th>Algo</th>' +
@@ -2719,20 +2766,19 @@ async function runExecution(compare = false) {
     document.getElementById('exCompare').innerHTML = '';
     document.getElementById('exMetrics').innerHTML = [
       makeMCard('Algorithm', escHtml(d.algo) + ' ' + escHtml(d.side), 'text'),
-      makeMCard('Filled', t.filled + ' / ' + d.ordered,
-                t.fill_rate >= 0.99 ? 'pos' : 'neg'),
+      makeMCard('Filled', t.filled + ' / ' + d.ordered, ''),
       makeMCard('Arrival price', d.arrival_px, ''),
       makeMCard('Execution VWAP', Number(t.exec_vwap).toFixed(3), ''),
-      makeMCard('Slippage vs arrival', Number(t.arrival_slippage_bps).toFixed(1) + ' bps',
+      makeMCard('Slippage vs arrival', fNum(t.arrival_slippage_bps, 1, true) + ' bps',
                 costClass(t.arrival_slippage_bps)),
       makeMCard('vs market VWAP', t.vs_market_vwap_bps === null ? 'n/a'
-                : Number(t.vs_market_vwap_bps).toFixed(1) + ' bps',
+                : fNum(t.vs_market_vwap_bps, 1, true) + ' bps',
                 costClass(t.vs_market_vwap_bps)),
-      makeMCard('Execution cost', Number(t.execution_cost).toFixed(2),
+      makeMCard('Execution cost', fNum(t.execution_cost, 2, true),
                 costClass(t.execution_cost)),
-      makeMCard('Opportunity cost', Number(t.opportunity_cost).toFixed(2),
+      makeMCard('Opportunity cost', fNum(t.opportunity_cost, 2, true),
                 costClass(t.opportunity_cost)),
-      makeMCard('Shortfall', Number(t.implementation_shortfall).toFixed(2),
+      makeMCard('Shortfall', fNum(t.implementation_shortfall, 2, true),
                 costClass(t.implementation_shortfall)),
     ].join('');
 
@@ -2752,7 +2798,7 @@ async function runExecution(compare = false) {
         options: chartOpts({animation: false,
           interaction: {mode: 'index', intersect: false},
           plugins: {legend: {display: true,
-            labels: {color: TOKENS.text, boxWidth: 16, font: {size: 12}}}}}),
+            labels: LEGEND_LABELS}}}),
       });
     }
   } catch (e) {
@@ -2802,10 +2848,10 @@ async function runAgent() {
     document.getElementById('agMetrics').innerHTML = [
       makeMCard('Strategy', escHtml(d.strategy), 'text'),
       makeMCard('Trials', d.trials, ''),
-      makeMCard('Out-of-sample return', o.return_pct + '%', o.return_pct >= 0 ? 'pos' : 'neg'),
-      makeMCard('Out-of-sample Sharpe', o.sharpe, o.sharpe >= 1 ? 'pos' : 'neg'),
-      makeMCard('Luck benchmark', c.luck_benchmark, ''),
-      makeMCard('Deflated Sharpe', c.deflated_sharpe, c.passed ? 'pos' : 'neg'),
+      makeMCard('OOS return', fPct(o.return_pct), sgnCls(o.return_pct)),
+      makeMCard('OOS Sharpe', fNum(o.sharpe), sgnCls(o.sharpe)),
+      makeMCard('Luck benchmark', fNum(c.luck_benchmark), ''),
+      makeMCard('Deflated Sharpe', fNum(c.deflated_sharpe), c.passed ? 'pos' : 'neg'),
     ].join('');
 
     const verdict = document.getElementById('agVerdict');

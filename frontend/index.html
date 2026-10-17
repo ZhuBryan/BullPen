@@ -78,7 +78,12 @@ h1.brand{margin:0;}
 .brand .mark{width:20px;height:20px;flex-shrink:0;border-radius:var(--r-xs);
   background:var(--surface3);border:1px solid var(--border2);
   display:flex;align-items:center;justify-content:center;}
-.tabnav{display:flex;gap:0;}
+/* The tab row scrolls sideways on its own when it can't fit (narrow laptop
+   windows, phones), instead of widening the whole page and giving every view
+   a horizontal scrollbar. */
+.tabnav{display:flex;gap:0;min-width:0;overflow-x:auto;scrollbar-width:none;}
+.tabnav::-webkit-scrollbar{display:none;}
+.tabbtn{flex-shrink:0;}
 /* Tabs read as a terminal's function row: small, uppercase, tracked out, with
    a 2px underline on the active one and no fill anywhere. */
 .tabbtn{position:relative;height:40px;padding:0 13px;background:transparent;border:none;box-shadow:none;color:var(--muted);font-size:var(--t-xs);font-weight:600;letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;transition:color 0.12s;font-family:inherit;border-radius:0;}
@@ -182,6 +187,11 @@ button:focus-visible{outline:2px solid var(--accentH);outline-offset:1px;}
 .lb-table tbody tr{border-bottom:1px solid var(--border);transition:background 0.1s;}
 .lb-table tbody tr:hover{background:var(--surface2);}
 .lb-table tbody td{padding:5px 8px;color:var(--text);vertical-align:middle;font-variant-numeric:tabular-nums;}
+/* The rule above out-specifies the .pos/.neg utilities, so restate them. */
+.lb-table tbody td.pos{color:var(--green);} .lb-table tbody td.neg{color:var(--red);}
+/* Row headers (metric names down the left) read as labels, not column heads. */
+.lb-table tbody th{position:static;background:transparent;text-transform:none;letter-spacing:0;
+  font-family:inherit;font-size:var(--t-sm);font-weight:500;color:var(--text2);padding:5px 8px;}
 .rank-badge{width:18px;height:18px;border-radius:var(--r-xs);display:inline-flex;align-items:center;justify-content:center;font-size:var(--t-2xs);font-weight:700;}
 .rank-1{background:var(--gold);color:#000;}
 /* --faint as a badge background put rank 2/3 text at ~2.2:1, effectively
@@ -287,6 +297,9 @@ tbody tr:hover{background:var(--surface2);}
 .heatmap-cell.best{outline:2px solid var(--text);outline-offset:-2px;}
 .heatmap-corner{color:var(--muted);font-size:var(--t-xs);text-transform:uppercase;letter-spacing:0.06em;}
 .note{background:var(--surface2);border:1px solid var(--border);border-left:2px solid var(--accent);border-radius:var(--r-sm);padding:8px 12px;font-size:var(--t-sm);color:var(--text2);margin-bottom:10px;line-height:1.55;}
+.note.warn{border-left-color:var(--amber);color:var(--text);}
+.note ul,ul.sub{margin:0;padding-left:var(--s-4);}
+.note li+li,ul.sub li+li{margin-top:var(--s-1);}
 .grid-field input.values{width:100%;min-width:200px;font-family:var(--mono);font-size:var(--t-base);}
 .field{display:flex;flex-direction:column;gap:4px;}
 .field label,.group-label{display:block;font-size:var(--t-2xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
@@ -322,6 +335,7 @@ h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;t
 .feat-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
 .feat-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:var(--t-base);}
 .feat-toggle input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px;min-width:14px;padding:0;border:none;}
+.feat-toggle:has(input:disabled){opacity:.45;cursor:not-allowed;}
 .feat-swatch{display:inline-block;width:18px;height:3px;border-radius:var(--r-xs);}
 .regime-separator{border:none;border-top:1px solid var(--border);margin:32px 0 24px;}
 #regGatedResults{display:none;}
@@ -358,6 +372,8 @@ h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;t
 .text-xs{font-size:var(--t-xs);}
 .muted{color:var(--muted);}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+td.sans{font-family:'Inter',system-ui,sans-serif;} .nowrap{white-space:nowrap;}
+input:disabled,select:disabled{opacity:.45;cursor:not-allowed;}
 /* Chart frames: fixed heights belong to a named size, not a magic number. */
 .chart-sm{height:160px;} .chart-md{height:280px;} .chart-lg{height:320px;}
 
@@ -426,6 +442,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
     <button id="tabBtnAnalysis" class="tabbtn" onclick="showTab('analysis')">Analysis</button>
     <button id="tabBtnRegime" class="tabbtn" onclick="showTab('regime')">Regime</button>
     <button id="tabBtnCompare" class="tabbtn" onclick="showTab('compare')">Compare</button>
+    <button id="tabBtnPortfolio" class="tabbtn" onclick="showTab('portfolio')">Portfolio</button>
     <button id="tabBtnEngine" class="tabbtn" onclick="showTab('engine')">Engine</button>
   </nav>
 </header>
@@ -596,11 +613,16 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
           <p id="labRuleStatus" class="rule-status"></p>
         </div>
         <p id="stratDesc" class="sub" style="margin:12px 0 0;font-size:12px;"></p>
+        <div class="field mt-3"><label for="fillModel">Fills</label>
+          <select id="fillModel">
+            <option value="close">Close (idealized)</option>
+            <option value="book">Order book (realistic)</option>
+          </select></div>
         <label class="feat-toggle mt-3" for="realFills">
           <input type="checkbox" id="realFills">
           <span>Realistic fills</span>
         </label>
-        <p class="sub" style="font-size:11px;margin-top:4px">
+        <p class="sub" style="font-size:11px;margin-top:4px" id="realFillsNote">
           Also charge an estimated half-spread and market impact, not just commission.
         </p>
         <p id="error" class="error"></p>
@@ -631,8 +653,19 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <div class="chart-box vol-box"><canvas id="volChart"></canvas></div>
         <div class="vol-label">Volume · ▲ buy ▼ sell</div>
       </div>
+      <div class="card" id="bookCard" style="display:none">
+        <h2>Execution · order book fills</h2>
+        <p class="sub mb-3">Each signal became a market order at the next open, filled level by level against a modelled book, so spread and size cost money.</p>
+        <dl class="metrics-grid" id="bookMetrics"></dl>
+        <p class="label mt-4">Why the return differs from close fills</p>
+        <dl class="metrics-grid" id="bookGap"></dl>
+        <p class="note mt-2 mb-0" id="bookNote"></p>
+        <p class="label mt-4">Worst trades by slippage</p>
+        <div class="table-scroll"><table class="lb-table" id="bookWorst"></table></div>
+      </div>
       <div class="card">
         <h2>Equity · strategy vs buy &amp; hold</h2>
+        <p class="sub text-sm mb-2">Survivorship bias: backtests use today's tickers, which survived by definition, so results are flattered.</p>
         <div class="chart-box chart-md"><canvas id="equityChart"></canvas></div>
       </div>
       <div class="card">
@@ -872,6 +905,7 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
     <div class="main-col" id="cmpResults" style="display:none">
       <div class="card">
         <h2>Equity curves</h2>
+        <p class="sub text-sm mb-2">Survivorship bias: backtests use today's tickers, which survived by definition, so results are flattered.</p>
         <div class="chart-box chart-md"><canvas id="cmpChart"></canvas></div>
       </div>
       <div class="card">
@@ -887,6 +921,78 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
 
   </div>
 </div><!-- end #tabCompare -->
+
+<!-- ===================================================================
+     TAB 6 — PORTFOLIO (several assets at once: sizing + risk)
+     =================================================================== -->
+<div id="tabPortfolio" class="tab-panel">
+  <div class="tab-body">
+
+    <div class="sidebar">
+      <div class="card">
+        <p class="label">Portfolio</p>
+        <div class="field mb-3">
+          <label for="pfTickers">Tickers (comma-separated)</label><textarea id="pfTickers" rows="2" style="height:56px">SPY, TLT, GLD, QQQ</textarea>
+        </div>
+        <div class="field mb-3"><label for="pfStart">Start</label><input id="pfStart" type="date" value="2015-01-01"></div>
+        <div class="field mb-3"><label for="pfEnd">End</label><input id="pfEnd" type="date" value="2025-01-01"></div>
+        <div class="field mb-3"><label for="pfWeighting">Weighting</label>
+          <select id="pfWeighting">
+            <option value="equal">Equal weight</option>
+            <option value="inverse_vol">Inverse volatility</option>
+            <option value="vol_target">Volatility target</option>
+            <option value="risk_parity">Risk parity</option>
+          </select></div>
+        <div class="field mb-3"><label for="pfTargetVol">Target vol (% per year)</label>
+          <input id="pfTargetVol" type="number" value="10" min="1" max="100" step="1" disabled></div>
+        <div class="field mb-3"><label for="pfLookback">Lookback (days)</label>
+          <input id="pfLookback" type="number" value="60" min="20" max="252">
+          <p class="hint" data-help-text="Lookback"></p></div>
+        <div class="field mb-3"><label for="pfRebalance">Rebalance</label>
+          <select id="pfRebalance"><option value="monthly">Monthly</option><option value="weekly">Weekly</option></select></div>
+        <div class="field mb-3"><label for="pfStrategy">Strategy</label>
+          <select id="pfStrategy"><option value="">None (always invested)</option></select></div>
+        <p id="pfError" class="error"></p>
+        <button id="pfRunBtn" onclick="runPortfolio()" class="w-full">Run portfolio</button>
+      </div>
+    </div>
+
+    <div class="main-col" id="pfPlaceholder" style="color:var(--muted);padding-top:24px;font-size:13px;">
+      Pick a few assets and a weighting scheme, then click <b style="color:var(--text)">Run portfolio</b>.
+    </div>
+
+    <div class="main-col" id="pfResults" style="display:none">
+      <dl class="metrics-grid" id="pfMetrics"></dl>
+      <div class="card">
+        <h2 id="pfEqTitle">Equity · portfolio vs benchmark</h2>
+        <div class="chart-box chart-md"><canvas id="pfEqChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Weights over time</h2>
+        <div class="chart-box chart-md"><canvas id="pfWChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Risk · daily loss and market exposure</h2>
+        <dl class="metrics-grid" id="pfRisk"></dl>
+      </div>
+      <div class="card">
+        <h2>Factor exposure</h2>
+        <div class="table-scroll"><table class="lb-table" id="pfFactors"></table></div>
+        <p class="sub text-sm mt-2" id="pfFactorNote"></p>
+      </div>
+      <div class="card">
+        <h2>Return correlation</h2>
+        <div class="table-scroll"><table class="heatmap-table" id="pfCorrTable"></table></div>
+      </div>
+      <div class="card">
+        <h2>Risk contribution · share of portfolio volatility</h2>
+        <div id="pfRiskContrib"></div>
+      </div>
+      <div class="note" id="pfNotes"></div>
+    </div>
+
+  </div>
+</div><!-- end #tabPortfolio -->
 
 <!-- ===================================================================
      TAB 6 — ENGINE (matching engine: simulated market + research agent)
@@ -928,6 +1034,31 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
           <input id="agBudget" type="number" value="40" min="5" max="200"></div>
         <button id="agBtn" class="w-full" onclick="runAgent()">Run search</button>
         <p id="agErr" class="error"></p>
+      </div>
+      <div class="card">
+        <p class="label">Market maker</p>
+        <div class="field mb-3"><label for="mmGamma">Gamma (risk aversion)</label>
+          <input id="mmGamma" type="number" value="0.1" min="0.001" max="10" step="0.05">
+          <p class="hint" data-help-text="Gamma"></p></div>
+        <div class="field mb-3"><label for="mmK">k (order arrival decay)</label>
+          <input id="mmK" type="number" value="1.5" min="0.01" max="50" step="0.1">
+          <p class="hint" data-help-text="k"></p></div>
+        <div class="field mb-3"><label for="mmSteps">Steps</label>
+          <input id="mmSteps" type="number" value="1000" min="100" max="3000"></div>
+        <div class="field mb-3"><label for="mmSeed">Seed</label>
+          <input id="mmSeed" type="number" value="7"></div>
+        <button id="mmBtn" class="w-full" onclick="runMaker()">Run maker</button>
+        <p id="mmErr" class="error"></p>
+      </div>
+      <div class="card">
+        <p class="label">Stylized facts</p>
+        <div class="field mb-3"><label for="sfTicker">Ticker</label><input id="sfTicker" value="SPY"></div>
+        <div class="field mb-3"><label for="sfStart">Start</label><input id="sfStart" type="date" value="2015-01-01"></div>
+        <div class="field mb-3"><label for="sfEnd">End</label><input id="sfEnd" type="date" value="2025-01-01"></div>
+        <div class="field mb-3"><label for="sfSteps">Sim steps</label>
+          <input id="sfSteps" type="number" value="3000" min="500" max="10000"></div>
+        <button id="sfBtn" class="w-full" onclick="runStylized()">Compare</button>
+        <p id="sfErr" class="error"></p>
       </div>
     </div>
 
@@ -998,6 +1129,46 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <div id="agVerdict" class="note mt-4"></div>
       </div>
     </div><!-- /card -->
+
+    <div class="card" id="mmCard" style="display:none">
+      <h2>Market maker · Avellaneda-Stoikov vs naive</h2>
+      <p class="sub mb-4">
+        A market maker earns the spread by quoting both a bid and an ask, but every fill
+        leaves it holding inventory that can lose value. Avellaneda-Stoikov (A-S) skews its
+        quotes against its inventory: long, it lowers both prices to sell more and buy less.
+        That sheds risk, and the cost is giving up spread. The naive maker quotes a fixed
+        width around the mid with only a small skew. Both run in the same seeded market,
+        but each maker's own quotes change what trades, so the two price paths drift apart.
+      </p>
+      <div class="table-scroll"><table class="lb-table" id="mmTable"></table></div>
+      <p class="sub text-sm mt-2" id="mmRead"></p>
+      <p class="label mt-4">Mid price and A-S quotes</p>
+      <div class="chart-box chart-md"><canvas id="mmPxChart"></canvas></div>
+      <p class="label mt-4">Inventory (shares)</p>
+      <div class="chart-box chart-sm"><canvas id="mmInvChart"></canvas></div>
+      <p class="label mt-4">A-S cumulative PnL decomposition ($)</p>
+      <div class="chart-box chart-sm"><canvas id="mmPnlChart"></canvas></div>
+    </div>
+
+    <div class="card" id="sfCard" style="display:none">
+      <h2>Is the simulator realistic? · stylized facts</h2>
+      <p class="sub mb-4">
+        Real returns share a few well-documented statistical habits. A simulator that
+        reproduces them is closer to a real market; one that misses them can teach the
+        wrong lessons. Each fact is tested on real daily returns and on the simulator's
+        step returns.
+      </p>
+      <p class="note warn" id="sfDataNote" style="display:none"></p>
+      <div class="table-scroll"><table class="lb-table" id="sfTable"></table></div>
+      <p class="label mt-4">ACF of |returns| · volatility clustering</p>
+      <div class="chart-box chart-sm"><canvas id="sfAbsChart"></canvas></div>
+      <p class="label mt-4">ACF of returns · should sit inside the band</p>
+      <div class="chart-box chart-sm"><canvas id="sfAcfChart"></canvas></div>
+      <p class="label mt-4">Standardized returns vs normal density</p>
+      <div class="chart-box chart-md"><canvas id="sfHistChart"></canvas></div>
+      <p class="label mt-4">Findings</p>
+      <ul class="sub text-sm" id="sfFindings"></ul>
+    </div>
 
     </div><!-- /#engineResults -->
   </div><!-- /.tab-body -->
@@ -1141,8 +1312,24 @@ function debouncedTickerInfo(ticker) {
 const MINUS = '\u2212';
 function fNum(v, dp = 2, signed = false) {
   if (v == null || !isFinite(v)) return '\u2014';
-  const s = Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
-  return (v < 0 ? MINUS : (signed && v > 0 ? '+' : '')) + s;
+  // Sign from the value as displayed: -0.001 at 2dp must read 0.00, not -0.00.
+  const r = Number(Number(v).toFixed(dp));
+  const s = Math.abs(r).toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
+  return (r < 0 ? MINUS : (signed && r > 0 ? '+' : '')) + s;
+}
+
+// Turn a failed API response into a readable Error. FastAPI sends `detail` as
+// a string for our own 400s but as a LIST of {loc, msg} for request
+// validation (422), which used to render as "[object Object]". A 500 may not
+// be JSON at all. Every fetch in the app goes through this.
+async function apiError(res, fallback) {
+  let d;
+  try { d = (await res.json()).detail; } catch { d = null; }
+  if (Array.isArray(d)) {
+    d = d.map(x => ((x.loc || []).filter(k => k !== 'body').join('.') || 'input') +
+                   ': ' + (x.msg || 'invalid')).join('; ');
+  }
+  return new Error(typeof d === 'string' && d ? d : fallback);
 }
 const fPct   = (v, dp = 2) => fNum(v, dp, true) + '%';
 const fMoney = v => (v < 0 ? MINUS : '') + '$' + fNum(Math.abs(v), 2);
@@ -1218,6 +1405,77 @@ const HELP = {
   'MEAN_REVERTING':  'Prices snapping back toward an average. Dip-buying and RSI strategies tend to do well here.',
   'HIGH_VOLATILITY': 'Large, fast swings, often in sell-offs. Most strategies struggle, and sitting out is often best.',
   'CHOPPY':          'Sideways with no clear direction. Trend strategies get whipsawed here.',
+  // Dropdown options: fill model (Lab)
+  'close': 'Fills every trade at the signal day’s close plus a cost estimate. Fast and simple, but assumes you could trade at a price that was already gone.',
+  'book':  'Sends a market order at the next open into a modelled order book, so you pay the spread and bigger orders move the price against you.',
+  // Book-fill execution report
+  'Orders':        'Number of orders sent to the book over the backtest.',
+  'Avg slippage':  'Average distance between the price you got and the price when the order arrived, in basis points (1 bp = 0.01%). Positive is a cost.',
+  'Total cost':    'Dollars lost to spread and price impact across all orders, not counting commission.',
+  'Cost (bps)':    'Total spread and impact cost as a share of the dollars traded, in basis points.',
+  'Fill rate':     'Share of the ordered shares that actually got filled. Below 100% means the book could not absorb the size.',
+  'Commission':    'Broker fees paid across all orders.',
+  'Close fills':   'Strategy return with idealized fills at the signal day’s close.',
+  'Book fills':    'Strategy return with realistic fills from the order book.',
+  'Return gap':    'Book-fill return minus close-fill return, in percentage points. It splits into timing, cost and capacity.',
+  'Timing':        'Part of the gap from trading at the next open instead of the signal day’s close. It can help or hurt.',
+  'Cost':          'Part of the gap from paying the spread and moving the price. Almost always negative.',
+  'Capacity':      'Part of the gap from shares the book could not fill, so the position ended up a different size than planned.',
+  'Date':          'Day the order was sent.',
+  'Side':          'B is a buy, S is a sell.',
+  'Ordered':       'Shares the strategy asked for.',
+  'Arrival':       'Price when the order arrived. Slippage is measured against it.',
+  // Market maker
+  'Gamma':          'Risk aversion. Higher gamma makes the maker skew its quotes harder to get rid of inventory, trading profit for safety.',
+  'k':              'How fast the chance of a fill drops as quotes move away from the mid. Higher k means far quotes rarely fill, so the maker quotes tighter.',
+  'A-S':            'Avellaneda-Stoikov maker: shifts its quotes against its inventory to keep its position small.',
+  'Naive':          'Simple maker: a fixed quote width around the mid with only a small skew.',
+  'Total PnL':      'Total profit or loss at the end: spread capture plus inventory PnL.',
+  'Spread capture': 'Profit from buying below the mid and selling above it, measured against the mid just before each fill. Negative means fills came at worse than the mid.',
+  'Inventory PnL':  'Profit or loss from the price moving while the maker held shares.',
+  'Inventory std':  'Standard deviation of the position over time. Lower means the maker carried less risk.',
+  'Max |inventory|':'Largest position held, long or short.',
+  'Fills':          'Number of the maker’s quotes that traded.',
+  'PnL per fill':   'Total PnL divided by the number of fills.',
+  'Time at limit':  'Share of time the position sat at the inventory cap, where the maker stops quoting one side.',
+  // Stylized facts
+  'Fact':                      'A statistical pattern found in nearly every real market’s returns.',
+  'Real':                      'Measured on daily returns downloaded for the ticker.',
+  'Simulated':                 'Measured on step returns from the simulated market.',
+  'Heavy tails':               'Big moves happen far more often than a bell curve predicts. Measured by excess kurtosis above 0.',
+  'No autocorrelation':        'Today’s return says almost nothing about tomorrow’s. Measured by the lag-1 autocorrelation of returns.',
+  'Volatility clustering':     'Calm days follow calm days and wild days follow wild days. Measured by the autocorrelation of |returns|.',
+  'Aggregational gaussianity': 'Returns over longer horizons look more like a bell curve. Measured by kurtosis shrinking from 1-step to 20-step returns.',
+  'Leverage effect':           'Falling prices tend to be followed by higher volatility. Measured by the correlation of returns with later |returns|, which should be negative.',
+  'Measure':                   'The statistic used to test the fact. Kurtosis measures fat tails (0 for a bell curve); ACF is autocorrelation, how much a series predicts itself.',
+  // Portfolio
+  'Annual vol':     'Annualized standard deviation of daily returns: how much the portfolio typically swings in a year.',
+  'Turnover':       'Share of the portfolio bought and sold per year to rebalance. Higher turnover means higher trading costs.',
+  'VaR 95 (hist)':  'Value at Risk: on 95% of days the loss was smaller than this. Read straight off past daily returns.',
+  'VaR 95 (param)': 'Value at Risk at 95%, estimated by assuming returns follow a bell curve. Underestimates risk when tails are heavy.',
+  'VaR 99 (hist)':  'On 99% of days the loss was smaller than this, from past daily returns.',
+  'VaR 99 (param)': 'Value at Risk at 99%, assuming a bell curve.',
+  'CVaR 95':        'Conditional VaR: the average loss on the worst 5% of days. Says how bad the bad days actually were.',
+  'CVaR 99':        'The average loss on the worst 1% of days.',
+  'Beta to SPY':    'How much the portfolio moves when the S&P 500 moves 1%. 1.0 moves with the market, 0 ignores it.',
+  'Corr to SPY':    'Correlation of daily returns with the S&P 500, from −1 to +1.',
+  'Beta':           'Sensitivity to a factor: how much the portfolio moves when that factor moves by one unit.',
+  't-stat':         'Beta divided by its standard error. Beyond about ±2 the exposure is unlikely to be chance.',
+  'Factor':         'A broad, well-known driver of returns. These use free ETF spreads as rough stand-ins for the academic factors.',
+  'Market':         'Exposure to the overall stock market (SPY).',
+  'Size':           'Tilt toward small companies over large ones (IWM minus SPY).',
+  'Value':          'Tilt toward cheap value stocks over growth stocks (IWD minus IWF).',
+  'Momentum':       'Tilt toward recent winners (MTUM minus SPY).',
+  'Alpha (annual)': 'Return left over after the factor exposures are accounted for, per year. Often luck, rarely skill.',
+  'R²':        'Share of the portfolio’s daily swings explained by the factors, from 0 to 1.',
+  'Lookback':       'How many past trading days of data are used to estimate volatility and correlation when setting weights.',
+  // Dropdown options: weighting and rebalance
+  'equal':       'Splits money equally across the assets. Naive, but famously hard to beat.',
+  'inverse_vol': 'Gives calmer assets more money and wilder ones less, so each contributes a similar amount of swing.',
+  'vol_target':  'Inverse-vol weights, then the whole portfolio is scaled so its expected volatility hits the target, holding cash when markets are wild.',
+  'risk_parity': 'Equal risk contribution: like inverse-vol, but also accounts for correlation, so assets that move together count as partly the same bet.',
+  'monthly':     'Reset the weights to target once a month.',
+  'weekly':      'Reset the weights to target every week. Tracks targets more closely but trades more.',
 };
 // Optimizer objectives are metric keys; reuse the metric definitions.
 Object.assign(HELP, {sharpe: HELP['Sharpe'], sortino: HELP['Sortino'],
@@ -1229,7 +1487,8 @@ for (const [k, name] of Object.entries({TRENDING: 'Trending', MEAN_REVERTING: 'M
 // Dropdowns that get a live description underneath. Strategy menus fall back
 // to the description the server sends with each strategy.
 const HINTED_SELECTS = ['regAttribStrategy', 'regBtStrategy', 'cmpStrategy',
-  'optObjective', 'wfObjective', 'regBtFilter', 'exAlgo'];
+  'optObjective', 'wfObjective', 'regBtFilter', 'exAlgo',
+  'fillModel', 'pfWeighting', 'pfRebalance', 'pfStrategy'];
 
 function helpFor(key) {
   if (HELP[key]) return HELP[key];
@@ -1262,6 +1521,8 @@ function markHelp(root) {
     }
     hint.textContent = helpFor(sel.value);
   });
+  // Static hints under number inputs (gamma, k, lookback): text from HELP.
+  root.querySelectorAll('.hint[data-help-text]').forEach(h => { h.textContent = HELP[h.dataset.helpText] || ''; });
 }
 
 // Deferred to DOMContentLoaded: `strategies` and other top-level `let`s are
@@ -1581,7 +1842,7 @@ function tradeMarkers(trades, dates) {
 let compareInitialized = false;
 
 function showTab(which) {
-  ['arena','lab','analysis','regime','compare','engine'].forEach(t => {
+  ['arena','lab','analysis','regime','compare','portfolio','engine'].forEach(t => {
     const cap = t.charAt(0).toUpperCase() + t.slice(1);
     const panel = document.getElementById('tab' + cap);
     if (panel) panel.style.display = t === which ? 'block' : 'none';
@@ -1589,11 +1850,14 @@ function showTab(which) {
     if (btn) {
       btn.classList.toggle('active', t === which);
       btn.setAttribute('aria-selected', String(t === which));
+      // If the tab row is scrolled, bring the chosen tab fully into view.
+      if (t === which && btn.scrollIntoView) btn.scrollIntoView({block: 'nearest', inline: 'nearest'});
     }
   });
   if (which === 'analysis' && !anStrategies.length) initAnalysis();
   if (which === 'regime'   && !regStrategiesLoaded)  initRegimeStrategies();
   if (which === 'compare'  && !compareInitialized) { compareInitialized = true; initCompare(); }
+  if (which === 'portfolio' && !pfInitialized) { pfInitialized = true; initPortfolio(); }
 }
 
 /* =====================================================================
@@ -1770,7 +2034,7 @@ async function newSeason() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Reset failed');
+    if (!res.ok) throw await apiError(res, 'Reset failed');
     applyArenaState(await res.json());
   } catch(e) { showArenaMessage(e.message); }
   finally { btn.disabled = false; btn.textContent = 'New season'; }
@@ -1817,8 +2081,7 @@ async function createAgent() {
       }),
     });
     if (!res.ok) {
-      const d = (await res.json()).detail;
-      throw new Error(typeof d === 'string' ? d : 'Could not create the fighter');
+      throw await apiError(res, 'Could not create the fighter');
     }
     document.getElementById('agentName').value  = '';
     document.getElementById('agentBuy').value   = '';
@@ -1832,7 +2095,7 @@ async function createAgent() {
 async function deleteAgent(id) {
   try {
     const res = await fetch('/api/arena/agents/' + encodeURIComponent(id), {method: 'DELETE'});
-    if (!res.ok) throw new Error((await res.json()).detail || 'Delete failed');
+    if (!res.ok) throw await apiError(res, 'Delete failed');
     pollArena();
   } catch(e) {
     const err = document.getElementById('agentError');
@@ -1875,6 +2138,17 @@ async function initLab() {
   renderParams();
 }
 
+// "Realistic fills" adds a cost estimate to close fills only; the order-book
+// model prices spread and impact itself, so the checkbox would do nothing.
+function syncFillModel() {
+  const book = document.getElementById('fillModel').value === 'book';
+  document.getElementById('realFills').disabled = book;
+  document.getElementById('realFillsNote').textContent = book
+    ? 'Not used with order book fills: the book already charges spread and impact.'
+    : 'Also charge an estimated half-spread and market impact, not just commission.';
+}
+document.getElementById('fillModel').addEventListener('change', syncFillModel);
+
 function renderParams() {
   const s = strategies.find(x => x.id === document.getElementById('strategy').value);
   if (!s) return;
@@ -1913,9 +2187,10 @@ async function runBacktest() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ticker, start: document.getElementById('start').value,
         end: document.getElementById('end').value, strategy: s.id, params,
-        realistic_fills: document.getElementById('realFills').checked}),
+        realistic_fills: document.getElementById('realFills').checked,
+        fill_model: document.getElementById('fillModel').value}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Backtest failed');
+    if (!res.ok) throw await apiError(res, 'Backtest failed');
     render(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run Backtest'; }
@@ -2015,6 +2290,7 @@ function render(r) {
   document.getElementById('sampleBanner').style.display  = r.data_source === 'sample' ? 'block' : 'none';
 
   document.getElementById('metricCards').innerHTML = backtestCards(r.metrics);
+  renderBookExecution(r);
 
   // ---- Price candles + volume + buy/sell markers ----
   if (priceChart) { priceChart.destroy(); priceChart = null; }
@@ -2067,6 +2343,42 @@ function render(r) {
     : '<tr><td colspan="5" style="color:var(--muted)">No trades (buy &amp; hold never sells)</td></tr>';
 
   if (r.monthly_returns) renderMonthlyHeatmap(r.monthly_returns, r.annual_returns);
+}
+
+// Order-book fills: what execution cost, and why the return differs from the
+// idealized close-fill run. Costs use costClass (positive = worse); return
+// effects use sgnCls (positive = more money).
+function renderBookExecution(r) {
+  const card = document.getElementById('bookCard');
+  card.style.display = r.fill_model === 'book' ? 'block' : 'none';
+  if (r.fill_model !== 'book') return;
+  const t = r.tca, c = r.comparison;
+  document.getElementById('bookMetrics').innerHTML = [
+    makeMCard('Orders', fNum(t.num_orders, 0), ''),
+    makeMCard('Avg slippage', fNum(t.avg_slippage_bps, 2, true) + ' bps', costClass(t.avg_slippage_bps)),
+    makeMCard('Total cost', fMoney(t.total_cost_usd), costClass(t.total_cost_usd)),
+    makeMCard('Cost (bps)', fNum(t.total_cost_bps, 2, true), costClass(t.total_cost_bps)),
+    makeMCard('Fill rate', fNum(t.fill_rate * 100, 1) + '%', ''),
+    makeMCard('Commission', fMoney(t.commission_usd), costClass(t.commission_usd)),
+  ].join('');
+  document.getElementById('bookGap').innerHTML = [
+    makeMCard('Close fills', fPct(c.close_fill_return_pct), sgnCls(c.close_fill_return_pct)),
+    makeMCard('Book fills', fPct(c.book_fill_return_pct), sgnCls(c.book_fill_return_pct)),
+    makeMCard('Return gap', fNum(c.return_gap_pct_points, 2, true) + ' pts', sgnCls(c.return_gap_pct_points)),
+    makeMCard('Timing', fNum(c.timing_effect_pct_points, 2, true) + ' pts', sgnCls(c.timing_effect_pct_points)),
+    makeMCard('Cost', fNum(c.cost_effect_pct_points, 2, true) + ' pts', sgnCls(c.cost_effect_pct_points)),
+    makeMCard('Capacity', fNum(c.capacity_effect_pct_points, 2, true) + ' pts', sgnCls(c.capacity_effect_pct_points)),
+  ].join('');
+  document.getElementById('bookNote').textContent = c.note || '';
+  const worst = [...(r.tca_trades || [])].sort((a, b) => b.slippage_bps - a.slippage_bps).slice(0, 10);
+  document.getElementById('bookWorst').innerHTML =
+    '<thead><tr><th>Date</th><th>Side</th><th class="ta-r">Ordered</th><th class="ta-r">Filled</th>' +
+    '<th class="ta-r">Arrival</th><th class="ta-r">Exec VWAP</th><th class="ta-r">Slippage (bps)</th></tr></thead><tbody>' +
+    worst.map(x => '<tr><td class="num">' + escHtml(x.date) + '</td><td>' + escHtml(x.side) + '</td>' +
+      '<td class="ta-r num">' + fNum(x.ordered, 0) + '</td><td class="ta-r num">' + fNum(x.filled, 0) + '</td>' +
+      '<td class="ta-r num">' + fNum(x.arrival_px) + '</td><td class="ta-r num">' + fNum(x.exec_vwap) + '</td>' +
+      '<td class="ta-r num ' + costClass(x.slippage_bps) + '">' + fNum(x.slippage_bps, 2, true) + '</td></tr>').join('') +
+    '</tbody>';
 }
 
 // Monthly returns heatmap — calendar-style table with color-coded cells.
@@ -2222,7 +2534,7 @@ async function runOptimize() {
       body: JSON.stringify({...analysisBaseBody(), param_grid,
         objective: document.getElementById('optObjective').value}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Optimizer failed');
+    if (!res.ok) throw await apiError(res, 'Optimizer failed');
     renderOptimize(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run optimizer'; }
@@ -2290,7 +2602,7 @@ async function runWalkForward() {
       body: JSON.stringify({...analysisBaseBody(), param_grid,
         objective: document.getElementById('wfObjective').value, n_folds}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Walk-forward failed');
+    if (!res.ok) throw await apiError(res, 'Walk-forward failed');
     renderWalkForward(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run walk-forward'; }
@@ -2340,7 +2652,7 @@ async function runMonteCarlo() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({...analysisBaseBody(), params, n_sims}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Monte Carlo failed');
+    if (!res.ok) throw await apiError(res, 'Monte Carlo failed');
     renderMonteCarlo(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run Monte Carlo'; }
@@ -2437,7 +2749,7 @@ async function runRegime() {
         end:    document.getElementById('regEnd').value,
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Regime detection failed');
+    if (!res.ok) throw await apiError(res, 'Regime detection failed');
     renderRegime(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Detect regimes'; }
@@ -2599,7 +2911,7 @@ async function runRegimeAttrib() {
         strategy: document.getElementById('regAttribStrategy').value,
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Attribution failed');
+    if (!res.ok) throw await apiError(res, 'Attribution failed');
     renderRegimeAttrib(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run attribution'; }
@@ -2643,7 +2955,7 @@ async function runRegimeBacktest() {
         regime_filter: filter,
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Gated backtest failed');
+    if (!res.ok) throw await apiError(res, 'Gated backtest failed');
     renderRegimeBacktest(await res.json(), filter);
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run gated backtest'; }
@@ -2714,7 +3026,7 @@ async function runCompare() {
         params:   {},
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Compare failed');
+    if (!res.ok) throw await apiError(res, 'Compare failed');
     renderCompare(await res.json());
   } catch(e) { err.textContent = e.message; err.style.display = 'block'; }
   finally { btn.disabled = false; btn.textContent = 'Run comparison'; }
@@ -2804,24 +3116,29 @@ function renderCorrHeatmap(items) {
   if (items.length < 2) { card.style.display = 'none'; return; }
   card.style.display = 'block';
   const rets = items.map(it => dailyReturns(it.equity));
+  document.getElementById('cmpCorrTable').innerHTML = corrHeatmapHtml(items.map(it => it.ticker),
+    items.map((_, i) => items.map((_, j) => i === j ? 1 : pearson(rets[i], rets[j]))));
+}
+
+// NxN matrix -> heatmap table body (shared by Compare and Portfolio).
+function corrHeatmapHtml(names, matrix) {
   const cellColor = v => {
     const op = Math.min(0.85, Math.abs(v) * 0.85 + 0.08);
     return v >= 0 ? 'background:rgba(34,197,94,' + op + ');color:#fff'
                   : 'background:rgba(239,68,68,' + op + ');color:#fff';
   };
   let html = '<thead><tr><th class="heatmap-corner"></th>' +
-    items.map(it => '<th>' + escHtml(it.ticker) + '</th>').join('') + '</tr></thead><tbody>';
-  for (let i = 0; i < items.length; i++) {
-    html += '<tr><th>' + escHtml(items[i].ticker) + '</th>';
-    for (let j = 0; j < items.length; j++) {
-      const v = i === j ? 1 : pearson(rets[i], rets[j]);
+    names.map(n => '<th>' + escHtml(n) + '</th>').join('') + '</tr></thead><tbody>';
+  for (let i = 0; i < names.length; i++) {
+    html += '<tr><th>' + escHtml(names[i]) + '</th>';
+    for (let j = 0; j < names.length; j++) {
+      const v = matrix[i][j];
       html += '<td class="heatmap-cell' + (i === j ? ' best' : '') + '" style="' + cellColor(v) + '">' +
-        v.toFixed(2) + '</td>';
+        fNum(v) + '</td>';
     }
     html += '</tr>';
   }
-  html += '</tbody>';
-  document.getElementById('cmpCorrTable').innerHTML = html;
+  return html + '</tbody>';
 }
 
 /* =====================================================================
@@ -2848,7 +3165,7 @@ async function runSim() {
         seed:  Number(document.getElementById('simSeed').value) || 7,
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Simulation failed');
+    if (!res.ok) throw await apiError(res, 'Simulation failed');
     const d = await res.json();
     if (!d.bars || !d.bars.length) throw new Error('The market produced no trades.');
 
@@ -2899,7 +3216,7 @@ async function runExecution(compare = false) {
         compare,
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Execution failed');
+    if (!res.ok) throw await apiError(res, 'Execution failed');
     const d = await res.json();
 
     document.getElementById('exSingle').style.display = d.compare ? 'none' : 'block';
@@ -2992,7 +3309,7 @@ async function runAgent() {
         budget,
       }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Agent search failed');
+    if (!res.ok) throw await apiError(res, 'Agent search failed');
     const d = await res.json();
     if (!d.found) {
       // Finding nothing is a legitimate scientific result, not an error.
@@ -3033,6 +3350,223 @@ async function runAgent() {
   } finally {
     btn.disabled = false; btn.textContent = 'Run search';
   }
+}
+
+// Shared plumbing for the maker, stylized-facts and portfolio charts: one
+// registry so every re-run destroys the old Chart before drawing the new one.
+const extraCharts = {};
+function drawChart(id, config) {
+  if (!HAS_CHARTS) return;
+  if (extraCharts[id]) extraCharts[id].destroy();
+  extraCharts[id] = new Chart(document.getElementById(id), config);
+}
+const lineDs = (label, data, color, extra) => ({label, data, borderColor: color,
+  backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, ...extra});
+const withLegend = extra => chartOpts({animation: false,
+  plugins: {legend: {display: true, labels: LEGEND_LABELS}}, ...extra});
+// POST JSON; a non-2xx response becomes an Error carrying the server's message.
+async function postJson(url, body, fallback) {
+  const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)});
+  if (!res.ok) throw await apiError(res, fallback);
+  return res.json();
+}
+// Run an async job behind a button: busy label, error box, always restored.
+async function withButton(btnId, errId, busy, job) {
+  const btn = document.getElementById(btnId), err = document.getElementById(errId);
+  const label = btn.textContent;
+  err.style.display = 'none'; btn.disabled = true; btn.textContent = busy;
+  try { await job(); }
+  catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+function showEngineCard(id) {
+  document.getElementById('engineResults').style.display = 'flex';
+  document.getElementById('enginePlaceholder').style.display = 'none';
+  document.getElementById(id).style.display = 'block';
+}
+
+/* ---- Market maker: Avellaneda-Stoikov vs naive ---- */
+function runMaker() {
+  return withButton('mmBtn', 'mmErr', 'Running…', async () => {
+    const num = id => Number(document.getElementById(id).value);
+    const d = await postJson('/api/sim/maker', {gamma: num('mmGamma'), k: num('mmK'),
+      steps: num('mmSteps'), seed: num('mmSeed')}, 'Market maker run failed');
+    showEngineCard('mmCard');
+    const a = d.summary.avellaneda_stoikov, n = d.summary.naive;
+    const rows = [
+      ['Total PnL', 'total_pnl', fMoney, sgnCls],
+      ['Spread capture', 'spread_capture', fMoney, sgnCls],
+      ['Inventory PnL', 'inventory_pnl', fMoney, sgnCls],
+      ['Inventory std', 'inventory_std', v => fNum(v, 2), () => ''],
+      ['Max |inventory|', 'max_abs_inventory', v => fNum(v, 0), () => ''],
+      ['Fills', 'fills', v => fNum(v, 0), () => ''],
+      ['PnL per fill', 'pnl_per_fill', v => fNum(v, 4, true), sgnCls],
+      ['Time at limit', 'time_at_limit', v => fNum(v * 100, 1) + '%', () => ''],
+    ];
+    const cell = (s, k, f, c) => '<td class="ta-r num ' + c(s[k]) + '">' + f(s[k]) + '</td>';
+    document.getElementById('mmTable').innerHTML =
+      '<thead><tr><th></th><th class="ta-r">A-S</th><th class="ta-r">Naive</th></tr></thead><tbody>' +
+      rows.map(([name, k, f, c]) => '<tr><th>' + name + '</th>' + cell(a, k, f, c) + cell(n, k, f, c) + '</tr>').join('') +
+      '</tbody>';
+    const ratio = a.inventory_std > 0 ? n.inventory_std / a.inventory_std : null;
+    document.getElementById('mmRead').textContent = 'In this run the naive maker’s inventory std was ' +
+      fNum(ratio, 1) + '× that of A-S. Total PnL: A-S ' + fMoney(a.total_pnl) + ', naive ' + fMoney(n.total_pnl) + '.';
+
+    const p = d.paths, x = d.step;
+    drawChart('mmPxChart', {type: 'line', data: {labels: x, datasets: [
+      lineDs('A-S ask', p.ask, TOKENS.amber, {borderWidth: 1, spanGaps: true}),
+      lineDs('A-S bid', p.bid, TOKENS.amber, {borderWidth: 1, spanGaps: true,
+        fill: '-1', backgroundColor: rgba(TOKENS.amber, 0.3)}),
+      lineDs('Mid', p.mid, TOKENS.accent, {borderWidth: 1}),
+    ]}, options: withLegend()});
+    drawChart('mmInvChart', {type: 'line', data: {labels: x, datasets: [
+      lineDs('A-S', p.inventory, TOKENS.accent),
+      lineDs('Naive', p.naive_inventory, PALETTE[5]),
+    ]}, options: withLegend()});
+    drawChart('mmPnlChart', {type: 'line', data: {labels: x, datasets: [
+      lineDs('Spread capture', p.spread_capture, PALETTE[4]),
+      lineDs('Inventory PnL', p.inventory_pnl, TOKENS.amber),
+      lineDs('Total', p.total_pnl, TOKENS.text, {borderWidth: 2}),
+    ]}, options: withLegend()});
+  });
+}
+
+/* ---- Stylized facts: real returns vs the simulator's ---- */
+const STYLIZED_FACTS = [
+  ['heavy_tails', 'Heavy tails', 'excess kurtosis', f => fNum(f.excess_kurtosis)],
+  ['no_autocorrelation', 'No autocorrelation', 'lag-1 ACF', f => fNum(f.lag1, 3, true)],
+  ['volatility_clustering', 'Volatility clustering', 'lags of |r| ACF above band', f => fNum(f.lags_above_band, 0) + ' / 20'],
+  ['aggregational_gaussianity', 'Aggregational gaussianity', 'kurtosis at 1 then 20 steps',
+    f => fNum(f.kurtosis_by_horizon[1]) + ' → ' + fNum(f.kurtosis_by_horizon[20])],
+  ['leverage_effect', 'Leverage effect', 'corr of r with later |r|, lags 1-5', f => fNum(f.mean_corr_lags_1_5, 3, true)],
+];
+function runStylized() {
+  return withButton('sfBtn', 'sfErr', 'Comparing…', async () => {
+    const v = id => document.getElementById(id).value;
+    const d = await postJson('/api/stylized', {ticker: v('sfTicker').trim() || 'SPY',
+      start: v('sfStart'), end: v('sfEnd'), sim_steps: Number(v('sfSteps'))}, 'Stylized facts failed');
+    showEngineCard('sfCard');
+    const note = document.getElementById('sfDataNote');
+    note.style.display = d.data_is_real ? 'none' : 'block';
+    note.textContent = d.data_is_real ? '' : 'Not real data. ' + d.data_note;
+    const mark = f => '<span class="' + (f.pass ? 'pos' : 'neg') + '">' + (f.pass ? 'pass' : 'fail') + '</span>';
+    document.getElementById('sfTable').innerHTML =
+      '<thead><tr><th>Fact</th><th>Measure</th><th class="ta-r">Real</th><th class="ta-r">Simulated</th></tr></thead><tbody>' +
+      STYLIZED_FACTS.map(([k, name, measure, val]) => {
+        const r = d.real.facts[k], s = d.sim.facts[k];
+        return '<tr><th>' + name + '</th><td class="muted sans">' + measure + '</td>' +
+          '<td class="ta-r num nowrap">' + val(r) + ' ' + mark(r) + '</td>' +
+          '<td class="ta-r num nowrap">' + val(s) + ' ' + mark(s) + '</td></tr>';
+      }).join('') + '</tbody>';
+
+    const band = Math.max(d.real.band, d.sim.band);
+    // The +/- band is where white noise's ACF lands 95% of the time.
+    const bandDs = sign => lineDs('95% noise band', d.lags.map(() => sign * band),
+      TOKENS.muted, {borderWidth: 1, borderDash: [4, 4]});
+    const acfOpts = withLegend({plugins: {legend: {display: true, labels: {...LEGEND_LABELS,
+      filter: it => it.datasetIndex !== 3}}}});
+    const acfChart = (id, key) => drawChart(id, {type: 'line', data: {labels: d.lags, datasets: [
+      lineDs('Real (' + d.data_source + ')', d.real[key], TOKENS.accent, {pointRadius: 2}),
+      lineDs('Simulated', d.sim[key], TOKENS.amber, {pointRadius: 2}),
+      bandDs(1), bandDs(-1),
+    ]}, options: acfOpts});
+    acfChart('sfAbsChart', 'acf_abs');
+    acfChart('sfAcfChart', 'acf');
+    const h = d.real.histogram;
+    drawChart('sfHistChart', {type: 'bar', data: {labels: h.centers.map(c => fNum(c, 1)), datasets: [
+      {label: 'Real', data: h.density, backgroundColor: rgba(TOKENS.accent, 0.55), barPercentage: 1, categoryPercentage: 0.9},
+      {label: 'Simulated', data: d.sim.histogram.density, backgroundColor: rgba(TOKENS.amber, 0.55), barPercentage: 1, categoryPercentage: 0.9},
+      {type: 'line', label: 'Normal', data: h.normal, borderColor: TOKENS.text, borderWidth: 1.5, pointRadius: 0},
+    ]}, options: withLegend()});
+    document.getElementById('sfFindings').innerHTML = (d.findings || []).map(f => '<li>' + escHtml(f) + '</li>').join('');
+  });
+}
+
+/* =====================================================================
+   PORTFOLIO TAB — several assets at once: sizing, risk, factors
+   ===================================================================== */
+let pfInitialized = false;
+async function initPortfolio() {
+  const w = document.getElementById('pfWeighting');
+  // Target vol only means something for the vol_target scheme.
+  w.addEventListener('change', () => { document.getElementById('pfTargetVol').disabled = w.value !== 'vol_target'; });
+  try {
+    const all = await (await fetch('/api/strategies')).json();
+    document.getElementById('pfStrategy').innerHTML += all.filter(s => s.id !== 'custom')
+      .map(s => '<option value="' + escHtml(s.id) + '">' + escHtml(s.label) + '</option>').join('');
+  } catch {}
+}
+
+function runPortfolio() {
+  return withButton('pfRunBtn', 'pfError', 'Running…', async () => {
+    const v = id => document.getElementById(id).value;
+    const tickers = v('pfTickers').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    const d = await postJson('/api/portfolio', {tickers, start: v('pfStart'), end: v('pfEnd'),
+      weighting: v('pfWeighting'), target_vol: Number(v('pfTargetVol')) / 100,
+      lookback: Number(v('pfLookback')), rebalance: v('pfRebalance'),
+      strategy: v('pfStrategy') || null, params: {}}, 'Portfolio run failed');
+    renderPortfolio(d);
+  });
+}
+
+function renderPortfolio(d) {
+  document.getElementById('pfResults').style.display = 'flex';
+  document.getElementById('pfPlaceholder').style.display = 'none';
+  const m = d.metrics, b = d.benchmark, rk = d.risk, f = rk.factors;
+  // backtestCards compares against buy & hold; here that is the benchmark basket.
+  document.getElementById('pfMetrics').innerHTML = backtestCards(
+    {...m, buy_hold_return_pct: b.metrics.total_return_pct}, 'Return', [
+      makeMCard('Annual vol', fNum(m.annual_vol_pct) + '%', ''),
+      makeMCard('Turnover', fNum(m.annual_turnover_pct, 1) + '% / yr', ''),
+    ]);
+
+  document.getElementById('pfEqTitle').textContent = 'Equity · portfolio vs ' + b.label;
+  drawChart('pfEqChart', {type: 'line', data: {labels: d.dates, datasets: [
+    lineDs('Portfolio (' + d.weighting + ')', d.equity, TOKENS.green,
+      {backgroundColor: areaFill(TOKENS.green), fill: true, borderWidth: 2}),
+    lineDs(b.label, b.equity, TOKENS.accent, {borderDash: [6, 4]}),
+  ]}, options: withLegend()});
+
+  const W = d.weights, series = Object.entries(W.by_ticker);
+  if (W.cash && W.cash.some(x => x > 0)) series.push(['Cash', W.cash]);
+  drawChart('pfWChart', {type: 'line', data: {labels: W.dates, datasets: series.map(([name, data], i) => {
+    const col = name === 'Cash' ? TOKENS.muted : PALETTE[i % PALETTE.length];
+    return lineDs(name, data, col, {fill: i ? '-1' : 'origin', backgroundColor: rgba(col, 0.55), borderWidth: 0});
+  })}, options: withLegend({scales: {y: {stacked: true, min: 0, max: 1,
+    ticks: {callback: v => fNum(v * 100, 0) + '%'}}}})});
+
+  const loss = v => [fPct(-v), 'neg'];
+  document.getElementById('pfRisk').innerHTML = [
+    ['VaR 95 (hist)', ...loss(rk.var95_hist_pct)], ['VaR 95 (param)', ...loss(rk.var95_param_pct)],
+    ['VaR 99 (hist)', ...loss(rk.var99_hist_pct)], ['VaR 99 (param)', ...loss(rk.var99_param_pct)],
+    ['CVaR 95', ...loss(rk.cvar95_hist_pct)], ['CVaR 99', ...loss(rk.cvar99_hist_pct)],
+    ['Beta to SPY', fNum(rk.beta_spy, 3), ''], ['Corr to SPY', fNum(rk.corr_spy, 3), ''],
+  ].map(c => makeMCard(...c)).join('');
+
+  const FACTORS = {market: 'Market', size: 'Size', value: 'Value', momentum: 'Momentum'};
+  document.getElementById('pfFactors').innerHTML =
+    '<thead><tr><th>Factor</th><th class="ta-r">Beta</th><th class="ta-r">t-stat</th></tr></thead><tbody>' +
+    Object.entries(FACTORS).map(([k, name]) => '<tr><th>' + name + '</th><td class="ta-r num">' +
+      fNum(f.betas[k], 3) + '</td><td class="ta-r num">' + fNum(f.t_stats[k]) + '</td></tr>').join('') +
+    '<tr><th>Alpha (annual)</th><td class="ta-r num ' + sgnCls(f.alpha_annual_pct) + '">' + fPct(f.alpha_annual_pct) +
+      '</td><td class="ta-r num">' + fNum(f.alpha_t_stat) + '</td></tr>' +
+    '<tr><th>R²</th><td class="ta-r num">' + fNum(f.r_squared, 3) + '</td><td></td></tr></tbody>';
+  document.getElementById('pfFactorNote').textContent = 'Proxies: ' + f.proxies + '. ' +
+    fNum(f.window.n_obs, 0) + ' days from ' + f.window.start + ' to ' + f.window.end + '.';
+
+  document.getElementById('pfCorrTable').innerHTML = corrHeatmapHtml(rk.correlation.tickers, rk.correlation.matrix);
+
+  const rc = rk.risk_contribution;
+  document.getElementById('pfRiskContrib').innerHTML = Object.entries(rc.share_of_vol_pct).map(([t, s]) =>
+    '<div class="attrib-row"><div class="text-xs"><b>' + escHtml(t) + '</b><br><span class="muted">weight ' +
+      fNum(rc.weights[t] * 100, 1) + '%</span></div>' +
+    '<div class="attrib-bar-wrap"><div class="attrib-bar" style="width:' + Math.max(0, Math.min(100, s)) +
+      '%;background:var(--accent)"></div></div>' +
+    '<div class="ta-r num">' + fNum(s, 1) + '%</div></div>').join('') +
+    '<p class="sub text-sm mt-2">Expected portfolio volatility at the last rebalance: ' + fNum(rc.ex_ante_vol_pct) + '% per year.</p>';
+
+  document.getElementById('pfNotes').innerHTML = '<ul>' + (d.notes || []).map(n => '<li>' + escHtml(n) + '</li>').join('') + '</ul>';
 }
 
 /* =====================================================================

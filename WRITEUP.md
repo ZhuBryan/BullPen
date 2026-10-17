@@ -186,6 +186,8 @@ Backpressure returns the value to the caller rather than blocking or dropping it
 
 The pipeline mode runs the same op file through the lock-free queue and through a mutex baseline, asserts both fed the matcher identical event counts, and prints the ratio. Benchmarking a lock-free structure against nothing proves it runs; benchmarking it against the obvious alternative on identical work shows whether the complexity earned anything.
 
+It earned 1.19x: 2.50M ops/sec against 2.10M, with identical event counts. That's less than I expected, and the backpressure counter told me why before I had a chance to invent a story. The producer found the queue full 132,821 times while pushing 20,000 ops. The feed thread was mostly waiting on the matcher, so I was measuring a queue that wasn't the constraint. This is the same lesson as the cancel profiling, from the other side: measure where the time goes before deciding what to optimize. A faster handoff into a matcher that can't keep up mostly buys a faster wait.
+
 ## Honest limitations
 
 The things this does not do, since a half-built project described accurately is worth more than a finished one described loosely:

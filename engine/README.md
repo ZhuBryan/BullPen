@@ -83,6 +83,15 @@ cargo run --release -- pipeline ../ops.txt
 
 That mode runs the same op stream through the queue and through a `Mutex<VecDeque>` baseline, asserts both produced identical event counts, and prints the ratio. Comparing against a mutex on identical work is the honest way to show whether lock-free earns its complexity.
 
+Measured on a 20,000-op file (single run, Windows, release build):
+
+| Handoff | Throughput | Events |
+|---|---|---|
+| Lock-free SPSC | 2.50M ops/sec | 24,065 |
+| `Mutex<VecDeque>` | 2.10M ops/sec | 24,065 |
+
+That's a 1.19x gain, which is smaller than you might expect, and the backpressure counter explains why. The producer hit a full queue 132,821 times while pushing 20,000 ops, about 6.6 retries per op. So the feed thread spent most of its time waiting for the matcher, not fighting over a lock. The queue isn't the bottleneck at this rate, so 1.19x is a floor on the difference rather than its size. It would widen with a cheaper consumer or a burstier producer. The run is also too short (8ms) to quote with any precision, so I'm reporting it as measured rather than as a headline.
+
 ## Order entry, FIX and the OMS
 
 `fix.py` speaks FIX 4.4, the protocol equity and futures order entry actually

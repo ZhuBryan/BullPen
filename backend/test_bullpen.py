@@ -1029,4 +1029,76 @@ except HTTPException as e:
     check(e.status_code == 400,
           f"/api/regime/attribution too-short data -> 400 ({str(e.detail)[:60]!r})")
 
+# ===========================================================================
+print("\n[23] Roadmap endpoints: book fills, market maker, stylized facts, portfolio")
+# ===========================================================================
+from fastapi import HTTPException
+from backend.main import (MakerRequest, PortfolioRequest, StylizedRequest,
+                          metrics_endpoint, portfolio_run, sim_maker, stylized_facts)
+
+# Order-book fills through the real /api/backtest handler
+book = backtest(BacktestRequest(ticker="BOOKTEST", start="2021-01-01", end="2023-01-01",
+                                strategy="sma_crossover", fill_model="book"))
+close = backtest(BacktestRequest(ticker="BOOKTEST", start="2021-01-01", end="2023-01-01",
+                                 strategy="sma_crossover"))
+check(book["fill_model"] == "book", "fill_model=book routes to the order-book backtester")
+check(set(close["metrics"]) <= set(book["metrics"]), "book result has every close-fill metric")
+check(len(book["equity"]) == len(close["equity"]), "book and close equity curves aligned")
+cmp_ = book["comparison"]
+check(abs(cmp_["timing_effect_pct_points"] + cmp_["cost_effect_pct_points"]
+          + cmp_["capacity_effect_pct_points"] - cmp_["return_gap_pct_points"]) <= 0.011,
+      "book-vs-close gap = timing + cost + capacity")
+check(cmp_["close_fill_return_pct"] == close["metrics"]["total_return_pct"],
+      "comparison's close-fill return matches the close-fill endpoint")
+check("annual_returns" in book, "book result still gets annual/monthly breakdowns")
+for bad in ("teleport", "BOOK"):
+    try:
+        backtest(BacktestRequest(ticker="BOOKTEST", start="2021-01-01", end="2023-01-01",
+                                 fill_model=bad))
+        check(False, f"fill_model={bad!r} should 400")
+    except HTTPException as e:
+        check(e.status_code == 400, f"fill_model={bad!r} -> 400")
+try:
+    backtest(BacktestRequest(ticker="BOOKTEST", start="2021-01-01", end="2023-01-01",
+                             fill_model="book", spread_model="guess"))
+    check(False, "unknown spread_model should 400")
+except HTTPException as e:
+    check(e.status_code == 400, "unknown spread_model -> 400")
+
+# Market maker
+mk = sim_maker(MakerRequest(steps=300, seed=3))
+for side in ("avellaneda_stoikov", "naive"):
+    sm = mk["summary"][side]
+    check(abs(sm["spread_capture"] + sm["inventory_pnl"] - sm["total_pnl"]) < 0.01,
+          f"{side}: total PnL = spread capture + inventory PnL")
+check(len(mk["paths"]["mid"]) == len(mk["paths"]["inventory"]) > 0, "maker paths aligned")
+check(sim_maker(MakerRequest(steps=300, seed=3)) == mk, "maker endpoint deterministic for a seed")
+
+# Stylized facts
+sf = stylized_facts(StylizedRequest(ticker="SPY", start="2018-01-01", end="2022-01-01",
+                                    sim_steps=600))
+check({"real", "sim", "findings", "data_source"} <= set(sf), "stylized result shape")
+check(sf["data_is_real"] == (sf["data_source"] in ("yahoo", "cache")),
+      "stylized flags whether 'real' data is real")
+
+# Portfolio
+pf = portfolio_run(PortfolioRequest(tickers=["AAA", "BBB", "CCC"], start="2019-01-01",
+                                    end="2022-01-01", weighting="vol_target"))
+check(len(pf["equity"]) == len(pf["dates"]) > 0, "portfolio equity aligned with dates")
+check(pf["risk"]["var99_hist_pct"] >= pf["risk"]["var95_hist_pct"] > 0, "VaR99 >= VaR95 > 0")
+check(any("urvivor" in n for n in pf["notes"]), "portfolio warns about survivorship bias")
+for bad_req, label in ((PortfolioRequest(tickers=["SPY"]), "one ticker"),
+                       (PortfolioRequest(weighting="yolo"), "unknown weighting"),
+                       (PortfolioRequest(strategy="nope"), "unknown strategy")):
+    try:
+        portfolio_run(bad_req)
+        check(False, f"portfolio {label} should 400")
+    except HTTPException as e:
+        check(e.status_code == 400, f"portfolio {label} -> 400")
+
+# Metrics expose which engine is serving, and book backtests are timed
+text = metrics_endpoint().body.decode()
+check('bullpen_engine_info{engine="' in text, "metrics report the matching engine in use")
+check("backtest" in text and "book" in text, "book backtests are timed in metrics")
+
 print(f"\nALL {PASSED} CHECKS PASSED")

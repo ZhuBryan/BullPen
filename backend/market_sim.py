@@ -36,13 +36,18 @@ import math
 import random
 import time
 
+# Book comes from fastbook: the Rust engine when its Python extension is built,
+# otherwise the Python one. Both implement the same portable interface (SPEC
+# 7.1) and produce identical events, which engine/test_pyo3.py checks.
 try:
-    from engine.orderbook import BUY, SELL, Book
+    from engine.fastbook import Book
+    from engine.orderbook import BUY, SELL
 except ImportError:                        # running this file directly
     import os
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from engine.orderbook import BUY, SELL, Book
+    from engine.fastbook import Book
+    from engine.orderbook import BUY, SELL
 
 TICK = 0.01          # dollars per tick
 START_PRICE = 10_000  # $100.00 in ticks

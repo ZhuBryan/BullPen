@@ -47,6 +47,11 @@ class BacktestRequest(BaseModel):
     # Bounded at the API edge: 0 disables impact, >1 would mean trading more
     # than a whole day's volume in one order.
     participation: float = Field(default=0.01, ge=0, le=1)
+    # "close": fill at the signal day's close plus a cost estimate (fast,
+    # idealized). "book": send a market order at the next open into a modelled
+    # order book, so size moves the price (see book_backtest.py).
+    fill_model: str = "close"
+    spread_model: str = "range"
 
 
 class RegimeRequest(BaseModel):
@@ -72,6 +77,36 @@ class AgentRequest(BaseModel):
 class SimRequest(BaseModel):
     steps: int = 400
     seed: int = 7
+
+
+class MakerRequest(BaseModel):
+    gamma: float = Field(default=0.1, gt=0, le=10)          # risk aversion
+    k: float = Field(default=1.5, gt=0, le=50)              # order-arrival decay
+    steps: int = Field(default=1000, ge=100, le=3_000)
+    seed: int = 7
+    inventory_limit: int = Field(default=200, ge=10, le=1_000)
+    horizon: int = Field(default=5, ge=1, le=100)
+
+
+class StylizedRequest(BaseModel):
+    ticker: str = "SPY"
+    start: str = "2015-01-01"
+    end: str = "2025-01-01"
+    sim_steps: int = Field(default=3000, ge=500, le=10_000)
+    seed: int = 7
+
+
+class PortfolioRequest(BaseModel):
+    tickers: List[str] = ["SPY", "TLT", "GLD", "QQQ"]
+    start: str = "2015-01-01"
+    end: str = "2025-01-01"
+    strategy: Optional[str] = None           # None = always invested
+    params: dict = {}
+    weighting: str = "equal"                 # equal | inverse_vol | vol_target | risk_parity
+    target_vol: float = Field(default=0.10, ge=0.01, le=1.0)
+    lookback: int = Field(default=60, ge=20, le=252)
+    rebalance: str = "monthly"               # monthly | weekly
+    starting_cash: float = Field(default=10_000.0, gt=0)
 
 
 class ExecutionRequest(BaseModel):
@@ -157,7 +192,13 @@ def metrics_endpoint():
     mean hides exactly the stall worth knowing about.
     """
     from fastapi.responses import PlainTextResponse
-    return PlainTextResponse(APP_METRICS.render_prometheus(),
+    from engine.fastbook import ENGINE
+    # Info metric (the Prometheus convention for build/config facts): always 1,
+    # the useful part is the label saying which matching engine is serving.
+    info = ("# HELP bullpen_engine_info Matching engine in use.\n"
+            "# TYPE bullpen_engine_info gauge\n"
+            f'bullpen_engine_info{{engine="{ENGINE}"}} 1\n')
+    return PlainTextResponse(APP_METRICS.render_prometheus() + info,
                              media_type="text/plain; version=0.0.4")
 
 
@@ -281,11 +322,23 @@ def _run_strategy(req):
         # What fraction of days were in this regime?
         regime_fraction = round(float(mask.reindex(positions.index).fillna(False).mean() * 100), 2)
 
-    result = run_backtest(
-        prices, positions, starting_cash=req.starting_cash,
-        realistic_fills=getattr(req, "realistic_fills", False),
-        participation=getattr(req, "participation", 0.01),
-    )
+    fill_model = getattr(req, "fill_model", "close")
+    if fill_model not in ("close", "book"):
+        raise HTTPException(400, "fill_model must be 'close' or 'book'.")
+    if fill_model == "book":
+        from backend.book_backtest import run as book_run
+        try:
+            with APP_METRICS.timer("backtest.book"):
+                result = book_run(prices, positions, starting_cash=req.starting_cash,
+                                  spread_model=getattr(req, "spread_model", "range"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    else:
+        result = run_backtest(
+            prices, positions, starting_cash=req.starting_cash,
+            realistic_fills=getattr(req, "realistic_fills", False),
+            participation=getattr(req, "participation", 0.01),
+        )
     result["ticker"] = req.ticker.upper()
     result["strategy"] = label
     result["data_source"] = source
@@ -406,6 +459,49 @@ def sim_run(req: SimRequest):
     APP_METRICS.incr("sim.runs")
     APP_METRICS.incr("sim.trades", out["trades"])
     return out
+
+
+@app.post("/api/sim/maker")
+def sim_maker(req: MakerRequest):
+    """Avellaneda-Stoikov market maker vs a naive symmetric one, same market.
+
+    Returns paths and a PnL decomposition (spread capture vs inventory) for
+    both, so the risk/return tradeoff of skewing quotes is visible.
+    """
+    from backend.market_sim import run_maker
+    with APP_METRICS.timer("sim.maker"):
+        out = run_maker(gamma=req.gamma, k=req.k, steps=req.steps, seed=req.seed,
+                        inventory_limit=req.inventory_limit, horizon=req.horizon)
+    APP_METRICS.incr("sim.maker_runs")
+    return out
+
+
+@app.post("/api/stylized")
+def stylized_facts(req: StylizedRequest):
+    """Do real returns and the simulator's returns show the stylized facts?"""
+    from backend.stylized import compare as stylized_compare
+    try:
+        with APP_METRICS.timer("stylized.compare"):
+            return stylized_compare(req.ticker.upper().strip(), req.start, req.end,
+                                    sim_steps=req.sim_steps, seed=req.seed)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/portfolio")
+def portfolio_run(req: PortfolioRequest):
+    """Multi-asset backtest with position sizing and portfolio risk numbers."""
+    from backend.portfolio import run as portfolio_backtest
+    tickers = [t.upper().strip() for t in req.tickers if t and t.strip()]
+    try:
+        with APP_METRICS.timer("portfolio.run"):
+            return portfolio_backtest(
+                tickers, req.start, req.end, strategy=req.strategy or None,
+                params=req.params, weighting=req.weighting, target_vol=req.target_vol,
+                lookback=req.lookback, rebalance=req.rebalance,
+                starting_cash=req.starting_cash)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/ai/translate")

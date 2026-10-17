@@ -23,6 +23,11 @@ from backend.strategies import STRATEGIES
 
 app = FastAPI(title="Bullpen — Trading Arena & Backtester")
 
+# Process-wide metrics. Counters and latency histograms for work actually done,
+# scraped at GET /api/metrics.
+from engine.metrics import Metrics  # noqa: E402
+APP_METRICS = Metrics()
+
 FRONTEND = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "index.html"
 )
@@ -141,6 +146,19 @@ class CompareRequest(BaseModel):
 @app.get("/")
 def home():
     return FileResponse(FRONTEND)
+
+
+@app.get("/api/metrics")
+def metrics_endpoint():
+    """Prometheus text exposition, the way a real service is scraped.
+
+    Counters and latency quantiles for work this process has actually done.
+    Latency is reported as a distribution rather than an average because a
+    mean hides exactly the stall worth knowing about.
+    """
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(APP_METRICS.render_prometheus(),
+                             media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/strategies")
@@ -328,8 +346,11 @@ def agent_search(req: AgentRequest):
 
     prices, source = _load_prices_for_analysis(req.ticker, req.start, req.end)
     budget = max(5, min(int(req.budget), 200))
-    out = ResearchAgent(prices, budget=budget, seed=int(req.seed),
-                        realistic_fills=req.realistic_fills).run()
+    with APP_METRICS.timer("agent.search"):
+        out = ResearchAgent(prices, budget=budget, seed=int(req.seed),
+                            realistic_fills=req.realistic_fills).run()
+    APP_METRICS.incr("agent.searches")
+    APP_METRICS.incr("agent.trials", out.get("trials", 0))
     out["ticker"] = req.ticker.upper().strip()
     out["data_source"] = source
     return out
@@ -356,12 +377,16 @@ def execution_run(req: ExecutionRequest):
         raise HTTPException(400, "side must be BUY or SELL")
     side = BUY if side_str == "BUY" else SELL
 
-    if req.compare:
-        return {"compare": compare_algos(total_qty=req.qty, steps=req.steps,
-                                         seed=req.seed, side=side)}
-    return run_execution(side=side, total_qty=req.qty, algo=algo,
-                         steps=req.steps, slices=req.slices,
-                         participation=req.participation, seed=req.seed)
+    APP_METRICS.incr("execution.runs")
+    with APP_METRICS.timer("execution.run"):
+        if req.compare:
+            return {"compare": compare_algos(total_qty=req.qty, steps=req.steps,
+                                             seed=req.seed, side=side)}
+        out = run_execution(side=side, total_qty=req.qty, algo=algo,
+                            steps=req.steps, slices=req.slices,
+                            participation=req.participation, seed=req.seed)
+    APP_METRICS.incr("execution.shares_filled", int(out["tca"]["filled"]))
+    return out
 
 
 @app.post("/api/sim/run")
@@ -376,7 +401,11 @@ def sim_run(req: SimRequest):
     from backend.market_sim import Simulation
 
     steps = max(50, min(int(req.steps), 2_000))   # keep a request bounded
-    return Simulation(seed=int(req.seed)).run(steps)
+    with APP_METRICS.timer("sim.run"):
+        out = Simulation(seed=int(req.seed)).run(steps)
+    APP_METRICS.incr("sim.runs")
+    APP_METRICS.incr("sim.trades", out["trades"])
+    return out
 
 
 @app.post("/api/ai/translate")

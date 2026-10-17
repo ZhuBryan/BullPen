@@ -97,11 +97,13 @@ class Position:
 class OMS:
     """Client-facing order management on top of a matching engine."""
 
-    def __init__(self, book=None, symbol="TEST", fee_per_share=0.0, risk=None):
+    def __init__(self, book=None, symbol="TEST", fee_per_share=0.0, risk=None,
+                 metrics=None):
         self.book = book or Book()
         self.symbol = symbol
         self.fee_per_share = fee_per_share
         self.risk = risk                      # optional RiskGate
+        self.metrics = metrics                # optional Metrics, see metrics.py
         self.orders: dict[str, fix.OrderState] = {}   # ClOrdID -> state
         self.by_venue_id: dict[int, str] = {}         # book order id -> ClOrdID
         self.reports: list[dict] = []
@@ -146,6 +148,8 @@ class OMS:
     # ---- order entry ---------------------------------------------------
     def new_order(self, cl_ord_id, side, qty, price=None, account="default"):
         """Accept a NewOrderSingle. Returns the reports it generated."""
+        import time
+        t0 = time.perf_counter_ns()
         start = len(self.reports)
         if cl_ord_id in self.orders:
             raise fix.FixError(f"duplicate ClOrdID {cl_ord_id}")
@@ -159,6 +163,7 @@ class OMS:
             except Exception as e:
                 order.transition(fix.OrdStatus.REJECTED)
                 self._report(order, fix.ExecType.REJECTED, text=str(e))
+                self._count("orders.rejected")
                 return self.reports[start:]
 
         book_side = FIX_TO_BOOK[side] if side in FIX_TO_BOOK else side
@@ -169,6 +174,10 @@ class OMS:
         self._report(order, fix.ExecType.NEW)["venue_id"] = venue_id
 
         self._drain()
+        self._count("orders.accepted")
+        if self.metrics is not None:
+            # Order-to-ack: submission through matching to the first report.
+            self.metrics.observe("order.ack_latency", time.perf_counter_ns() - t0)
         # A market order that could not fill completely never rests.
         if price is None and not order.is_terminal and order.leaves_qty > 0:
             order.transition(fix.OrdStatus.CANCELED)
@@ -198,6 +207,7 @@ class OMS:
             self.book.cancel(venue_id)
         order.transition(fix.OrdStatus.CANCELED)
         self._report(order, fix.ExecType.CANCELED)
+        self._count("orders.canceled")
         return self.reports[start:]
 
     def replace(self, cl_ord_id, orig_cl_ord_id, qty, price, account="default"):
@@ -235,6 +245,10 @@ class OMS:
         self.new_order(cl_ord_id, order.side, qty - already, price, account)
         return self.reports[start:]
 
+    def _count(self, name, by=1):
+        if self.metrics is not None:
+            self.metrics.incr(name, by)
+
     # ---- fills ---------------------------------------------------------
     def _drain(self):
         """Turn new book trades into fills, reports and position changes."""
@@ -255,6 +269,8 @@ class OMS:
                 self.position.apply(book_side, qty, price, fee)
                 self._report(order, fix.ExecType.TRADE,
                              last_qty=qty, last_px=price)
+                self._count("fills")
+                self._count("shares.filled", qty)
         self._seen_events = len(self.book.events)
 
     # ---- views ---------------------------------------------------------
@@ -381,6 +397,24 @@ def demo():
     o5.new_order("B", fix.Side.BUY, 100, price=50)
     snap = o5.position.snapshot(mark=55)
     assert snap["qty"] == 0 and abs(snap["fees"] - 2.0) < 1e-9, snap
+
+    # ---- metrics are wired, not decorative ----
+    try:
+        from engine.metrics import Metrics
+    except ImportError:
+        from metrics import Metrics
+    m = Metrics()
+    om = OMS(symbol="AAPL", metrics=m)
+    om.new_order("M", fix.Side.SELL, 100, price=100)
+    om.new_order("T", fix.Side.BUY, 40, price=100)
+    om.cancel("C", "M")
+    snap = m.snapshot()
+    assert snap["counters"]["orders.accepted"] == 2, snap
+    assert snap["counters"]["orders.canceled"] == 1
+    assert snap["counters"]["fills"] == 2, "both sides of a fill count"
+    assert snap["counters"]["shares.filled"] == 80, snap
+    assert snap["latency"]["order.ack_latency"]["count"] == 2
+    assert "orders_accepted 2" in m.render_prometheus()
 
     print("ok — FIX lifecycle, cancel/replace priority, IOC remainder, "
           "average-cost PnL incl. flip through zero")

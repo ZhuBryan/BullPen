@@ -39,7 +39,7 @@ jobs:
         run: python backend/test_bullpen.py
       - name: Backend module self-checks
         run: |
-          for m in fills market_sim exec_sim stylized book_backtest portfolio agent; do
+          for m in fills market_sim exec_sim stylized forecast book_backtest portfolio agent; do
             echo "== backend.$m"
             python -m backend.$m
           done
@@ -74,6 +74,43 @@ jobs:
         if: runner.os == 'Linux'        # one OS is enough to know it builds
         working-directory: engine/rust/bench
         run: cargo bench --no-run
+
+  cpp:
+    # The third implementation. Linux: strict warnings, the selftest, an
+    # AddressSanitizer + UBSan build replaying 200,000 ops, and the
+    # differential test against the Python oracle. Windows: MSVC, the
+    # compiler most likely to disagree with g++, then the same diff test.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build, selftest, sanitizers (g++)
+        if: runner.os == 'Linux'
+        working-directory: engine/cpp
+        run: |
+          make
+          make test
+          make debug
+          python ../diff_test.py gen /tmp/big.txt 200000
+          ./bullpen_cpp_debug selftest
+          ./bullpen_cpp_debug replay /tmp/big.txt > /dev/null
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Build (MSVC)
+        if: runner.os == 'Windows'
+        working-directory: engine/cpp
+        run: |
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /WX /Fe:bullpen_cpp.exe main.cpp
+          .\bullpen_cpp.exe selftest
+      - name: Differential test (Python oracle vs C++, 20,000 ops)
+        working-directory: engine
+        run: python diff_test.py check ops.txt 20000
 
   pyo3:
     runs-on: ubuntu-latest
@@ -139,6 +176,12 @@ jobs:
           cargo build --release
           ./target/release/bullpen_engine bench ../ops.txt | tee ../../bench-rust.txt
           ./target/release/bullpen_engine pipeline ../ops.txt | tee -a ../../bench-rust.txt
+      - name: C++ benchmark on the same op file
+        working-directory: engine/cpp
+        shell: bash
+        run: |
+          make
+          ./bullpen_cpp bench ../ops.txt | tee -a ../../bench-rust.txt
       - name: Criterion
         working-directory: engine/rust/bench
         shell: bash

@@ -83,10 +83,9 @@ h1.brand{margin:0;}
    a horizontal scrollbar. */
 .tabnav{display:flex;gap:0;min-width:0;overflow-x:auto;scrollbar-width:none;}
 .tabnav::-webkit-scrollbar{display:none;}
-.tabbtn{flex-shrink:0;}
 /* Tabs read as a terminal's function row: small, uppercase, tracked out, with
    a 2px underline on the active one and no fill anywhere. */
-.tabbtn{position:relative;height:40px;padding:0 13px;background:transparent;border:none;box-shadow:none;color:var(--muted);font-size:var(--t-xs);font-weight:600;letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;transition:color 0.12s;font-family:inherit;border-radius:0;}
+.tabbtn{position:relative;flex-shrink:0;height:40px;padding:0 13px;background:transparent;border:none;box-shadow:none;color:var(--muted);font-size:var(--t-xs);font-weight:600;letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;transition:color 0.12s;font-family:inherit;border-radius:0;}
 .tabbtn:hover{color:var(--text2);}
 .tabbtn.active{color:var(--text);}
 .tabbtn.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);}
@@ -335,7 +334,10 @@ h2{font-size:var(--t-xs);color:var(--muted);margin-bottom:12px;font-weight:600;t
 .feat-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
 .feat-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:var(--t-base);}
 .feat-toggle input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px;min-width:14px;padding:0;border:none;}
+/* The label dims; the checkbox inside must not dim again (stacked opacity
+   took it to ~0.2, nearly invisible). */
 .feat-toggle:has(input:disabled){opacity:.45;cursor:not-allowed;}
+.feat-toggle input:disabled{opacity:1;}
 .feat-swatch{display:inline-block;width:18px;height:3px;border-radius:var(--r-xs);}
 .regime-separator{border:none;border-top:1px solid var(--border);margin:32px 0 24px;}
 #regGatedResults{display:none;}
@@ -3554,15 +3556,25 @@ function renderPortfolio(d) {
   ].map(c => makeMCard(...c)).join('');
 
   const FACTORS = {market: 'Market', size: 'Size', value: 'Value', momentum: 'Momentum'};
+  // The backend returns factors: {error} for short windows, omits it when SPY
+  // is missing, and drops any factor it had no real data for. Render what's
+  // there instead of assuming all four.
+  if (!f || !f.betas) {
+    document.getElementById('pfFactors').innerHTML =
+      '<tbody><tr><td class="muted sans">Factor regression unavailable' +
+      (f && f.error ? ': ' + escHtml(f.error) : '') + '.</td></tr></tbody>';
+    document.getElementById('pfFactorNote').textContent = '';
+  } else {
   document.getElementById('pfFactors').innerHTML =
     '<thead><tr><th>Factor</th><th class="ta-r">Beta</th><th class="ta-r">t-stat</th></tr></thead><tbody>' +
-    Object.entries(FACTORS).map(([k, name]) => '<tr><th>' + name + '</th><td class="ta-r num">' +
+    Object.entries(FACTORS).filter(([k]) => k in f.betas).map(([k, name]) => '<tr><th>' + name + '</th><td class="ta-r num">' +
       fNum(f.betas[k], 3) + '</td><td class="ta-r num">' + fNum(f.t_stats[k]) + '</td></tr>').join('') +
     '<tr><th>Alpha (annual)</th><td class="ta-r num ' + sgnCls(f.alpha_annual_pct) + '">' + fPct(f.alpha_annual_pct) +
       '</td><td class="ta-r num">' + fNum(f.alpha_t_stat) + '</td></tr>' +
     '<tr><th>R²</th><td class="ta-r num">' + fNum(f.r_squared, 3) + '</td><td></td></tr></tbody>';
   document.getElementById('pfFactorNote').textContent = 'Proxies: ' + f.proxies + '. ' +
     fNum(f.window.n_obs, 0) + ' days from ' + f.window.start + ' to ' + f.window.end + '.';
+  }
 
   document.getElementById('pfCorrTable').innerHTML = corrHeatmapHtml(rk.correlation.tickers, rk.correlation.matrix);
 

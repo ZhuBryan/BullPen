@@ -8,10 +8,6 @@ venv/
 data/*.csv
 data/*.json
 
-# Local notes, not part of the public project
-CLAUDE.md
-HANDOFF.md
-NOTES.md
 
 # OS / editor cruft
 .DS_Store

@@ -355,7 +355,7 @@ owns.** Shared files (`backend/main.py`, `frontend/index.html`,
 by the integrator, who wires endpoints, registers tests and commits. Agents
 never commit.
 
-Conventions for every module (from CLAUDE.md): stdlib/numpy/pandas only (no
+Conventions for every module (the project's house rules): stdlib/numpy/pandas only (no
 new dependencies except where listed below), no paid APIs, beginner-friendly
 comments that explain the finance, signals on day T trade on day T+1, and one
 `demo()` self-check with `assert`s that `python -m <module>` runs and that

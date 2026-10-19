@@ -1065,6 +1065,15 @@ try:
 except HTTPException as e:
     check(e.status_code == 400, "unknown spread_model -> 400")
 
+# Strategy parameters are bounded by their declared min/max (one shared parser)
+for params, label in (({"fast": 1e9}, "fast=1e9"), ({"fast": "abc"}, "fast='abc'")):
+    try:
+        backtest(BacktestRequest(ticker="BOOKTEST", start="2021-01-01", end="2023-01-01",
+                                 strategy="sma_crossover", params=params))
+        check(False, f"{label} should 400")
+    except HTTPException as e:
+        check(e.status_code == 400, f"strategy param {label} -> 400 ({e.detail})")
+
 # Market maker
 mk = sim_maker(MakerRequest(steps=300, seed=3))
 for side in ("avellaneda_stoikov", "naive"):

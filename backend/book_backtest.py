@@ -45,7 +45,7 @@ try:
 except ImportError:
     from engine.orderbook import Book
 from engine.execution import Fill, tca
-from backend.backtest import run_backtest, TRADING_DAYS_PER_YEAR
+from backend.backtest import run_backtest, summary_metrics
 from backend.fills import MAX_COST, MIN_HALF_SPREAD, estimate_costs
 
 # --- liquidity model constants ----------------------------------------------
@@ -119,30 +119,17 @@ def _affordable(book, cash, commission_pct, levels):
 
 
 def _metrics(equity, starting_cash, trade_log, bh_return_pct):
-    """Same formulas as run_backtest step 4/5 (it does not factor them out)."""
-    strat_ret = equity.pct_change()
-    strat_ret.iloc[0] = equity.iloc[0] / starting_cash - 1
-    years = len(equity) / TRADING_DAYS_PER_YEAR
-    total = equity.iloc[-1] / starting_cash - 1
-    cagr = (equity.iloc[-1] / starting_cash) ** (1 / years) - 1 if years > 0 else 0.0
-    std = strat_ret.std()
-    sharpe = strat_ret.mean() / std * np.sqrt(TRADING_DAYS_PER_YEAR) if std > 0 else 0.0
-    dd_std = float(np.sqrt((strat_ret.clip(upper=0) ** 2).mean()))
-    sortino = strat_ret.mean() / dd_std * np.sqrt(TRADING_DAYS_PER_YEAR) if dd_std > 0 else 0.0
-    drawdown = equity / equity.cummax() - 1
-    mdd = drawdown.min()
-    calmar = (cagr * 100) / abs(mdd * 100) if mdd < 0 else 0.0
+    """backtest.summary_metrics on the ledger's equity, plus the trade stats."""
+    ret = equity.pct_change()
+    ret.iloc[0] = equity.iloc[0] / starting_cash - 1
+    core, drawdown = summary_metrics(ret, starting_cash)
     wins = sum(1 for t in trade_log if t["return_pct"] > 0)
     return drawdown, {
-        "total_return_pct": round(total * 100, 2),
+        **core,
         "buy_hold_return_pct": bh_return_pct,
-        "cagr_pct": round(cagr * 100, 2),
-        "sharpe": round(float(sharpe), 2),
-        "sortino": round(float(sortino), 2),
-        "max_drawdown_pct": round(float(mdd) * 100, 2),
-        "calmar_ratio": round(float(calmar), 2),
         "win_rate_pct": round(wins / len(trade_log) * 100 if trade_log else 0.0, 1),
         "num_trades": len(trade_log),
+        # the ledger, not the compounded returns, is the source of truth
         "final_equity": round(float(equity.iloc[-1]), 2),
     }
 

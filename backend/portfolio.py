@@ -31,9 +31,9 @@ held from day T+1, the same rule backtest.py applies to signals.
 import numpy as np
 import pandas as pd
 
-from backend.backtest import TRADING_DAYS_PER_YEAR, run_backtest
+from backend.backtest import TRADING_DAYS_PER_YEAR, run_backtest, summary_metrics
 from backend.data import get_prices
-from backend.strategies import STRATEGIES
+from backend.strategies import STRATEGIES, clean_params
 
 WEIGHTINGS = ("equal", "inverse_vol", "vol_target", "risk_parity")
 REBALANCES = ("monthly", "weekly")
@@ -57,33 +57,10 @@ def _phi(z):
     return np.exp(-0.5 * z * z) / np.sqrt(2 * np.pi)
 
 
-# ---------------------------------------------------------------------------
-# Metrics: same names and definitions as backtest.py (raw Sharpe with rf = 0,
-# Sortino with full-sample downside deviation, Calmar = CAGR / |max DD|).
-# backtest.py computes them inline rather than in a reusable function, so the
-# formulas are repeated here; demo() checks they agree with run_backtest.
-# ---------------------------------------------------------------------------
 def _metrics(ret: np.ndarray, starting_cash: float) -> tuple[dict, np.ndarray]:
-    equity = starting_cash * np.cumprod(1 + ret)
-    years = len(ret) / TRADING_DAYS_PER_YEAR
-    total = equity[-1] / starting_cash - 1
-    cagr = (equity[-1] / starting_cash) ** (1 / years) - 1 if years > 0 else 0.0
-    sd = ret.std(ddof=1)
-    sharpe = ret.mean() / sd * np.sqrt(TRADING_DAYS_PER_YEAR) if sd > 0 else 0.0
-    down = np.sqrt((np.minimum(ret, 0) ** 2).mean())
-    sortino = ret.mean() / down * np.sqrt(TRADING_DAYS_PER_YEAR) if down > 0 else 0.0
-    mdd = (equity / np.maximum.accumulate(equity) - 1).min()
-    calmar = (cagr * 100) / abs(mdd * 100) if mdd < 0 else 0.0
-    return {
-        "total_return_pct": round(float(total) * 100, 2),
-        "cagr_pct": round(float(cagr) * 100, 2),
-        "sharpe": round(float(sharpe), 2),
-        "sortino": round(float(sortino), 2),
-        "max_drawdown_pct": round(float(mdd) * 100, 2),
-        "calmar_ratio": round(float(calmar), 2),
-        "annual_vol_pct": round(float(sd * np.sqrt(TRADING_DAYS_PER_YEAR)) * 100, 2),
-        "final_equity": round(float(equity[-1]), 2),
-    }, equity
+    """backtest.summary_metrics (the project's one metric definition) + equity."""
+    metrics, _ = summary_metrics(ret, starting_cash)
+    return metrics, starting_cash * np.cumprod(1 + ret)
 
 
 # ---------------------------------------------------------------------------
@@ -289,21 +266,6 @@ def _core(close: pd.DataFrame, signals: pd.DataFrame | None, weighting="equal",
     }
 
 
-def _clean_params(strategy: str, params: dict | None) -> dict:
-    """Same validation as /api/compare: known strategy, known numeric params."""
-    if strategy not in STRATEGIES:
-        raise ValueError(f"Unknown strategy: {strategy}")
-    allowed = {p["name"] for p in STRATEGIES[strategy]["params"]}
-    out = {}
-    for name, value in (params or {}).items():
-        if name in allowed:
-            try:
-                out[name] = float(value) if "." in str(value) else int(value)
-            except (TypeError, ValueError):
-                raise ValueError(f"Parameter '{name}' must be a number.")
-    return out
-
-
 def _factor_block(port: pd.Series, start: str, end: str) -> tuple[dict, dict]:
     """Beta to SPY plus a 4-factor OLS on free ETF proxies."""
     closes, sources = {}, {}
@@ -387,7 +349,7 @@ def run(tickers, start, end, strategy=None, params=None, weighting="equal",
         raise ValueError("starting_cash must be greater than zero.")
     if commission_pct < 0:
         raise ValueError("commission_pct cannot be negative.")
-    clean = _clean_params(strategy, params) if strategy else {}
+    clean = clean_params(strategy, params) if strategy else {}
 
     frames, sources = {}, {}
     for t in tickers:

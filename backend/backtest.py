@@ -66,59 +66,9 @@ def run_backtest(
     equity = starting_cash * (1 + strat_ret).cumprod()
     buy_hold = starting_cash * (1 + stock_ret).cumprod()
 
-    # --- Step 4: metrics ----------------------------------------------
-    n_days = len(close)
-    years = n_days / TRADING_DAYS_PER_YEAR
-
-    total_return = equity.iloc[-1] / starting_cash - 1
+    # --- Step 4: metrics (shared with the book backtest and portfolio) ----
+    core, drawdown = summary_metrics(strat_ret, starting_cash)
     bh_return = buy_hold.iloc[-1] / starting_cash - 1
-    cagr = (equity.iloc[-1] / starting_cash) ** (1 / years) - 1 if years > 0 else 0.0
-
-    # Sharpe ratio: average return / volatility, annualized.
-    # > 1 is good, > 2 is great, > 3 means check your code for bugs :)
-    # NOTE: risk-free rate is taken as ZERO, so this is a raw Sharpe, not an
-    # excess-return Sharpe. With rf at 5% that flatters a long-only strategy by
-    # roughly 0.05/annual_vol. Fine as a convention, as long as it is stated.
-    std = strat_ret.std()
-    sharpe = (strat_ret.mean() / std) * np.sqrt(TRADING_DAYS_PER_YEAR) if std > 0 else 0.0
-
-    # Sortino ratio: like Sharpe, but only punishes DOWNSIDE volatility.
-    # Sharpe treats a big up day and a big down day as equally "risky" --
-    # but investors don't actually mind upside swings! Sortino instead
-    # divides by the standard deviation of just the negative daily returns
-    # ("downside deviation"), so a strategy that has wild upside days but
-    # calm downside days scores better here than under Sharpe.
-    # Downside deviation is the root-mean-square of the NEGATIVE returns taken
-    # over EVERY observation, not the standard deviation of the negative ones.
-    # Two common mistakes hide here: dividing by the count of down days instead
-    # of the full sample, and measuring spread around the mean of the negatives
-    # instead of around the target return of zero. Both inflate Sortino, and
-    # they inflate it most for the strategies that already look best.
-    downside_std = float(np.sqrt((strat_ret.clip(upper=0) ** 2).mean()))
-    if downside_std > 0:
-        sortino = (strat_ret.mean() / downside_std) * np.sqrt(TRADING_DAYS_PER_YEAR)
-    else:
-        # No down days at all, so downside risk is zero and Sortino is formally
-        # infinite. We report 0.0 because the optimizer sorts on this field and
-        # None/inf would either crash it or fail to serialize. Treat 0.0 here as
-        # "undefined", not "bad" -- it only happens on degenerate inputs.
-        sortino = 0.0
-
-    # Max drawdown: worst peak-to-trough loss. The "how much pain" metric.
-    running_max = equity.cummax()
-    drawdown = equity / running_max - 1
-    max_drawdown = drawdown.min()
-
-    # Calmar ratio: annualized return per unit of worst-case pain, i.e.
-    # CAGR divided by the magnitude of the max drawdown. A Calmar of 2
-    # means you earned 2% CAGR for every 1% of the deepest dip you had to
-    # sit through. Higher = better return for the drawdown you endured.
-    if max_drawdown < 0:
-        calmar = (cagr * 100) / abs(max_drawdown * 100)
-    else:
-        # No drawdown at all -- nothing to divide by, so there's no
-        # meaningful "pain-adjusted" return to report. Default to 0.0.
-        calmar = 0.0
 
     # --- Step 5: trade log + win rate ----------------------------------
     # `pos` is already shifted, so pos[i]=1 means we were HOLDING during day i,
@@ -187,20 +137,89 @@ def run_backtest(
         "ohlc": ohlc,
         "volume": volume,
         "metrics": {
-            "total_return_pct": round(total_return * 100, 2),
+            **core,
             "buy_hold_return_pct": round(bh_return * 100, 2),
-            "cagr_pct": round(cagr * 100, 2),
-            "sharpe": round(float(sharpe), 2),
-            "sortino": round(float(sortino), 2),
-            "max_drawdown_pct": round(float(max_drawdown) * 100, 2),
-            "calmar_ratio": round(float(calmar), 2),
             "win_rate_pct": round(win_rate * 100, 1),
             "num_trades": len(trade_log),
-            "final_equity": round(float(equity.iloc[-1]), 2),
         },
         "trades": trade_log[-50:],  # show at most the last 50 trades
     }
 
+
+
+def summary_metrics(strat_ret, starting_cash: float) -> tuple[dict, pd.Series]:
+    """Performance metrics from a series of daily returns.
+
+    The one definition of Sharpe, Sortino, Calmar, CAGR and max drawdown in the
+    project: the single-ticker backtest, the order-book backtest and the
+    portfolio layer all call this, so the same strategy can never score
+    differently depending on which engine produced its returns.
+    Returns (metrics, drawdown series).
+    """
+    strat_ret = pd.Series(strat_ret, dtype=float)
+    equity = starting_cash * (1 + strat_ret).cumprod()
+    years = len(strat_ret) / TRADING_DAYS_PER_YEAR
+
+    total_return = equity.iloc[-1] / starting_cash - 1
+    cagr = (equity.iloc[-1] / starting_cash) ** (1 / years) - 1 if years > 0 else 0.0
+
+    # Sharpe ratio: average return / volatility, annualized.
+    # > 1 is good, > 2 is great, > 3 means check your code for bugs :)
+    # NOTE: risk-free rate is taken as ZERO, so this is a raw Sharpe, not an
+    # excess-return Sharpe. With rf at 5% that flatters a long-only strategy by
+    # roughly 0.05/annual_vol. Fine as a convention, as long as it is stated.
+    std = strat_ret.std()
+    sharpe = (strat_ret.mean() / std) * np.sqrt(TRADING_DAYS_PER_YEAR) if std > 0 else 0.0
+
+    # Sortino ratio: like Sharpe, but only punishes DOWNSIDE volatility.
+    # Sharpe treats a big up day and a big down day as equally "risky" --
+    # but investors don't actually mind upside swings! Sortino instead
+    # divides by the standard deviation of just the negative daily returns
+    # ("downside deviation"), so a strategy that has wild upside days but
+    # calm downside days scores better here than under Sharpe.
+    # Downside deviation is the root-mean-square of the NEGATIVE returns taken
+    # over EVERY observation, not the standard deviation of the negative ones.
+    # Two common mistakes hide here: dividing by the count of down days instead
+    # of the full sample, and measuring spread around the mean of the negatives
+    # instead of around the target return of zero. Both inflate Sortino, and
+    # they inflate it most for the strategies that already look best.
+    downside_std = float(np.sqrt((strat_ret.clip(upper=0) ** 2).mean()))
+    if downside_std > 0:
+        sortino = (strat_ret.mean() / downside_std) * np.sqrt(TRADING_DAYS_PER_YEAR)
+    else:
+        # No down days at all, so downside risk is zero and Sortino is formally
+        # infinite. We report 0.0 because the optimizer sorts on this field and
+        # None/inf would either crash it or fail to serialize. Treat 0.0 here as
+        # "undefined", not "bad" -- it only happens on degenerate inputs.
+        sortino = 0.0
+
+    # Max drawdown: worst peak-to-trough loss. The "how much pain" metric.
+    running_max = equity.cummax()
+    drawdown = equity / running_max - 1
+    max_drawdown = drawdown.min()
+
+    # Calmar ratio: annualized return per unit of worst-case pain, i.e.
+    # CAGR divided by the magnitude of the max drawdown. A Calmar of 2
+    # means you earned 2% CAGR for every 1% of the deepest dip you had to
+    # sit through. Higher = better return for the drawdown you endured.
+    if max_drawdown < 0:
+        calmar = (cagr * 100) / abs(max_drawdown * 100)
+    else:
+        # No drawdown at all -- nothing to divide by, so there's no
+        # meaningful "pain-adjusted" return to report. Default to 0.0.
+        calmar = 0.0
+
+
+    return {
+        "total_return_pct": round(total_return * 100, 2),
+        "cagr_pct": round(cagr * 100, 2),
+        "sharpe": round(float(sharpe), 2),
+        "sortino": round(float(sortino), 2),
+        "max_drawdown_pct": round(float(max_drawdown) * 100, 2),
+        "calmar_ratio": round(float(calmar), 2),
+        "annual_vol_pct": round(float(std) * np.sqrt(TRADING_DAYS_PER_YEAR) * 100, 2),
+        "final_equity": round(float(equity.iloc[-1]), 2),
+    }, drawdown
 
 def _build_ohlc(prices: pd.DataFrame) -> list:
     """

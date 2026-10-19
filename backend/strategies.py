@@ -158,3 +158,31 @@ STRATEGIES = {
         ],
     },
 }
+
+
+def clean_params(strategy: str, params: dict | None) -> dict:
+    """Validate user-supplied strategy parameters. Raises ValueError (-> HTTP 400).
+
+    Unknown names are dropped, values must be numbers, and each must sit inside
+    the min/max its strategy declares above. Without the bounds a request could
+    ask for a 1e9-day moving average and get a confusing all-cash result, or a
+    pathological amount of work. Every endpoint that runs a strategy uses this.
+    """
+    if strategy not in STRATEGIES:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    out = {}
+    for spec in STRATEGIES[strategy]["params"]:
+        name = spec["name"]
+        if name not in (params or {}):
+            continue
+        value = params[name]
+        try:
+            num = float(value) if "." in str(value) else int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Parameter '{name}' must be a number.")
+        lo, hi = spec.get("min"), spec.get("max")
+        if (lo is not None and num < lo) or (hi is not None and num > hi) or num != num:
+            raise ValueError(f"Parameter '{name}' must be between {lo} and {hi}.")
+        out[name] = num
+    return out
+

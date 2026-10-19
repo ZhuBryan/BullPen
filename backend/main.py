@@ -19,7 +19,7 @@ from backend.backtest import run_backtest
 from backend.data import get_prices
 from backend.regime import REGIMES, classify_regimes, regime_mask
 from backend.rules import rule_positions, validate_rules
-from backend.strategies import STRATEGIES
+from backend.strategies import STRATEGIES, clean_params as clean_strategy_params
 
 app = FastAPI(title="Bullpen — Trading Arena & Backtester")
 
@@ -290,14 +290,10 @@ def _run_strategy(req):
         label = "Custom Rules"
     else:
         spec = STRATEGIES[req.strategy]
-        allowed = {p["name"] for p in spec["params"]}
-        clean_params = {}
-        for name, value in req.params.items():
-            if name in allowed:
-                try:
-                    clean_params[name] = float(value) if "." in str(value) else int(value)
-                except (TypeError, ValueError):
-                    raise HTTPException(400, f"Parameter '{name}' must be a number.")
+        try:
+            clean_params = clean_strategy_params(req.strategy, req.params)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         positions = spec["func"](prices, **clean_params)
         label = spec["label"]
 
@@ -655,14 +651,10 @@ def montecarlo(req: MonteCarloRequest):
         label = "Custom Rules"
     else:
         spec = STRATEGIES[req.strategy]
-        allowed = {p["name"] for p in spec["params"]}
-        clean_params = {}
-        for name, value in req.params.items():
-            if name in allowed:
-                try:
-                    clean_params[name] = float(value) if "." in str(value) else int(value)
-                except (TypeError, ValueError):
-                    raise HTTPException(400, f"Parameter '{name}' must be a number.")
+        try:
+            clean_params = clean_strategy_params(req.strategy, req.params)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         positions = spec["func"](prices, **clean_params)
         label = spec["label"]
     try:
@@ -783,14 +775,10 @@ def compare(req: CompareRequest):
         raise HTTPException(404, f"Unknown strategy: {req.strategy}")
 
     spec = STRATEGIES[req.strategy]
-    allowed = {p["name"] for p in spec["params"]}
-    clean_params = {}
-    for name, value in req.params.items():
-        if name in allowed:
-            try:
-                clean_params[name] = float(value) if "." in str(value) else int(value)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"Parameter '{name}' must be a number.")
+    try:
+        clean_params = clean_strategy_params(req.strategy, req.params)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     # --- Step 1: load all price series independently -------------------------
     ticker_data = []
@@ -918,14 +906,10 @@ def regime_attribution(req: RegimeAttributionRequest):
         label = "Custom Rules"
     else:
         spec = STRATEGIES[req.strategy]
-        allowed = {p["name"] for p in spec["params"]}
-        clean_params = {}
-        for name, value in req.params.items():
-            if name in allowed:
-                try:
-                    clean_params[name] = float(value) if "." in str(value) else int(value)
-                except (TypeError, ValueError):
-                    raise HTTPException(400, f"Parameter '{name}' must be a number.")
+        try:
+            clean_params = clean_strategy_params(req.strategy, req.params)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         positions = spec["func"](prices, **clean_params)
         label = spec["label"]
 

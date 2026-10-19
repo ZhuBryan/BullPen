@@ -10,6 +10,8 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -17,7 +19,7 @@ from backend.ai import AIError, translate as ai_translate
 from backend.analysis import optimize_strategy, walk_forward, monte_carlo
 from backend.arena import get_arena
 from backend.backtest import run_backtest
-from backend.data import get_prices
+from backend.data import DataRangeError, get_prices
 from backend.regime import REGIMES, classify_regimes, regime_mask
 from backend.rules import rule_positions, validate_rules
 from backend.strategies import STRATEGIES, clean_params as clean_strategy_params
@@ -47,6 +49,21 @@ def _finite(x):
 app = FastAPI(title="Bullpen — Trading Arena & Backtester",
               default_response_class=SafeJSONResponse)
 
+
+@app.exception_handler(RequestValidationError)
+def _invalid_request(_request, exc):
+    # FastAPI's default 422 handler echoes the bad input back, and a request
+    # body of {"starting_cash": Infinity} (legal JSON from many encoders)
+    # made that echo itself crash into a 500. Same response, safe encoder.
+    return SafeJSONResponse({"detail": jsonable_encoder(exc.errors())}, status_code=422)
+
+
+@app.exception_handler(DataRangeError)
+def _bad_range(_request, exc):
+    # Raised deep inside get_prices; one handler maps it to a 400 for every
+    # endpoint instead of each one catching it.
+    return SafeJSONResponse({"detail": str(exc)}, status_code=400)
+
 # Process-wide metrics. Counters and latency histograms for work actually done,
 # scraped at GET /api/metrics.
 from engine.metrics import Metrics  # noqa: E402
@@ -63,9 +80,10 @@ class BacktestRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    # gt=0 so a zero or negative value is a clean 422 from the API layer
-    # instead of a ZeroDivisionError 500 deep inside the metrics.
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    # Bounded at the API layer, so bad values are a clean 422: under $1 the
+    # rounded equity can hit 0 and divide by zero deep in the metrics, and the
+    # upper bound also rejects Infinity, which JSON happily carries.
+    starting_cash: float = Field(default=10_000.0, ge=1, le=1e12)
     regime_filter: Optional[str] = None
     realistic_fills: bool = False
     # Bounded at the API edge: 0 disables impact, >1 would mean trading more
@@ -129,7 +147,7 @@ class PortfolioRequest(BaseModel):
     target_vol: float = Field(default=0.10, ge=0.01, le=1.0)
     lookback: int = Field(default=60, ge=20, le=252)
     rebalance: str = "monthly"               # monthly | weekly
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    starting_cash: float = Field(default=10_000.0, ge=1, le=1e12)
 
 
 class ExecutionRequest(BaseModel):
@@ -169,9 +187,10 @@ class OptimizeRequest(BaseModel):
     strategy: str = "sma_crossover"
     param_grid: dict = {}
     objective: str = "sharpe"
-    # gt=0 so a zero or negative value is a clean 422 from the API layer
-    # instead of a ZeroDivisionError 500 deep inside the metrics.
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    # Bounded at the API layer, so bad values are a clean 422: under $1 the
+    # rounded equity can hit 0 and divide by zero deep in the metrics, and the
+    # upper bound also rejects Infinity, which JSON happily carries.
+    starting_cash: float = Field(default=10_000.0, ge=1, le=1e12)
 
 
 class WalkForwardRequest(OptimizeRequest):
@@ -184,9 +203,10 @@ class MonteCarloRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    # gt=0 so a zero or negative value is a clean 422 from the API layer
-    # instead of a ZeroDivisionError 500 deep inside the metrics.
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    # Bounded at the API layer, so bad values are a clean 422: under $1 the
+    # rounded equity can hit 0 and divide by zero deep in the metrics, and the
+    # upper bound also rejects Infinity, which JSON happily carries.
+    starting_cash: float = Field(default=10_000.0, ge=1, le=1e12)
     n_sims: int = 500
 
 
@@ -196,9 +216,10 @@ class CompareRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    # gt=0 so a zero or negative value is a clean 422 from the API layer
-    # instead of a ZeroDivisionError 500 deep inside the metrics.
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    # Bounded at the API layer, so bad values are a clean 422: under $1 the
+    # rounded equity can hit 0 and divide by zero deep in the metrics, and the
+    # upper bound also rejects Infinity, which JSON happily carries.
+    starting_cash: float = Field(default=10_000.0, ge=1, le=1e12)
 
 
 @app.get("/")
@@ -876,9 +897,10 @@ class RegimeAttributionRequest(BaseModel):
     end: str = "2025-01-01"
     strategy: str = "sma_crossover"
     params: dict = {}
-    # gt=0 so a zero or negative value is a clean 422 from the API layer
-    # instead of a ZeroDivisionError 500 deep inside the metrics.
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    # Bounded at the API layer, so bad values are a clean 422: under $1 the
+    # rounded equity can hit 0 and divide by zero deep in the metrics, and the
+    # upper bound also rejects Infinity, which JSON happily carries.
+    starting_cash: float = Field(default=10_000.0, ge=1, le=1e12)
     regime_filter: Optional[str] = None
 
 

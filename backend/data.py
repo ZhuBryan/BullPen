@@ -100,11 +100,33 @@ def _generate_sample_data(ticker: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
+MAX_YEARS = 50   # longest date range any request may ask for
+
+
+class DataRangeError(ValueError):
+    """Bad or oversized date range. main.py turns this into an HTTP 400."""
+
+
+def _check_range(start: str, end: str) -> None:
+    # Every endpoint loads prices through here, so this one check bounds them
+    # all. Without it a request for 1700-2260 generated 560 years of synthetic
+    # data and tied up the free server for over a minute.
+    try:
+        s, e = pd.Timestamp(start), pd.Timestamp(end)
+    except (ValueError, TypeError):
+        raise DataRangeError("Dates must look like YYYY-MM-DD.")
+    if e <= s:
+        raise DataRangeError("End date must be after the start date.")
+    if s.year < 1900 or e.year > 2100 or (e - s).days > MAX_YEARS * 366:
+        raise DataRangeError(f"Date range is limited to {MAX_YEARS} years, between 1900 and 2100.")
+
+
 def get_prices(ticker: str, start: str, end: str) -> tuple[pd.DataFrame, str]:
     """
     Main entry point. Returns (dataframe, source) where source is one of
-    'cache', 'yahoo', or 'sample'.
+    'cache', 'yahoo', or 'sample'. Raises DataRangeError on a bad range.
     """
+    _check_range(start, end)
     ticker = ticker.upper().strip()
     path = _cache_path(ticker, start, end)
 

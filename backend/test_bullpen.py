@@ -1109,6 +1109,22 @@ _r = TestClient(_app).post("/api/portfolio", json={
 check(_r.status_code == 200, f"never-invested portfolio -> 200 (got {_r.status_code})")
 check(_r.json()["risk"].get("corr_spy") is None, "undefined correlation is null, not NaN")
 
+# Input bounds found in review: oversized/garbled date ranges and absurd cash
+_c = TestClient(_app)
+for body, label in (({"start": "1700-01-01", "end": "2260-01-01"}, "560-year range"),
+                    ({"start": "2024-01-01", "end": "2020-01-01"}, "end before start"),
+                    ({"start": "yesterday", "end": "2024-01-01"}, "unparseable date")):
+    r = _c.post("/api/backtest", json={"ticker": "SPY", **body})
+    check(r.status_code == 400, f"backtest {label} -> 400 ({r.json().get('detail')})")
+r = _c.post("/api/portfolio", json={"tickers": ["A1", "B1"], "start": "1700-01-01", "end": "2260-01-01"})
+check(r.status_code == 400, "portfolio 560-year range -> 400")
+for cash in (1e-6, 1e13):
+    r = _c.post("/api/backtest", json={"ticker": "SPY", "starting_cash": cash, "fill_model": "book"})
+    check(r.status_code == 422, f"starting_cash={cash:g} -> 422")
+r = _c.post("/api/backtest", content=b'{"ticker": "SPY", "starting_cash": Infinity}',
+            headers={"Content-Type": "application/json"})
+check(r.status_code == 422, f"starting_cash=Infinity -> 422 (got {r.status_code})")
+
 # Metrics expose which engine is serving, and book backtests are timed
 text = metrics_endpoint().body.decode()
 check('bullpen_engine_info{engine="' in text, "metrics report the matching engine in use")

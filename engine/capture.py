@@ -600,7 +600,28 @@ def _ev(U, u, bids=(), asks=()):
     return {"U": U, "u": u, "b": [list(x) for x in bids], "a": [list(x) for x in asks]}
 
 
+# Kraken's own published example (docs.kraken.com, "Book checksum (WebSocket
+# v2)"): this snapshot must hash to 3310070434. Pinning the implementation to
+# the exchange's test vector, not just to one we built by hand, is what makes
+# the first live recording trustworthy.
+_KRAKEN_DOC_BIDS = [("45283.5", "0.10000000"), ("45283.4", "1.54582015"), ("45282.1", "0.10000000"),
+                    ("45281.0", "0.10000000"), ("45280.3", "1.54592586"), ("45279.0", "0.07990000"),
+                    ("45277.6", "0.03310103"), ("45277.5", "0.30000000"), ("45277.3", "1.54602737"),
+                    ("45276.6", "0.15445238")]
+_KRAKEN_DOC_ASKS = [("45285.2", "0.00100000"), ("45286.4", "1.54571953"), ("45286.6", "1.54571109"),
+                    ("45289.6", "1.54560911"), ("45290.2", "0.15890660"), ("45291.8", "1.54553491"),
+                    ("45294.7", "0.04454749"), ("45296.1", "0.35380000"), ("45297.5", "0.09945542"),
+                    ("45299.5", "0.18772827")]
+
+
+def _kraken_doc_vector():
+    units = lambda levels: [(to_units(p, 1), to_units(q, 8)) for p, q in levels]
+    got = kraken_checksum(units(_KRAKEN_DOC_BIDS), units(_KRAKEN_DOC_ASKS))
+    assert got == 3310070434, f"Kraken documentation test vector: got {got}"
+
+
 def demo():
+    _kraken_doc_vector()
     snap = {"lastUpdateId": 100, "bids": [["10.0", "5"]], "asks": [["11.0", "5"]]}
 
     # events arriving before the snapshot are buffered, then replayed

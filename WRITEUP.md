@@ -202,11 +202,25 @@ The second round of features (order-book backtests, a portfolio layer, a market 
 
 The common thread is that a self-check written alongside the code tests what the author was thinking about. The fixes were each small. Finding them took someone asking "what's the nastiest input that's still legal?", and every one of those inputs is now a test.
 
+## My simulated market was trading against itself
+
+The simulator failed one of the most basic tests a market model can take: its returns were predictable. Real returns have almost no lag-1 autocorrelation; the simulator's was +0.35, meaning a rise this step strongly predicted a rise next step.
+
+The obvious suspect was the momentum traders, and removing them did fix the number. But real markets have momentum traders too, and they still don't trend step to step, because liquidity providers absorb predictable flow. So deleting them would have been tuning the model to pass the test. Running each agent type out in turn, and checking the measurement itself, pointed somewhere else. The naive market maker centred its quotes on the current mid, and the current mid was mostly *its own previous quotes*. Its small inventory skew was applied again on top of the last one every step, so a price offset became a price velocity, and every move got locked in as the new reference for the momentum traders to chase. Centring the makers on the microprice of everyone else's orders took the correlation to about zero and the test to passing on 87% of held-out seeds, with heavy tails and volatility clustering intact.
+
+Fixing that exposed a second bug in the Avellaneda-Stoikov maker. Its inventory term was counted in shares, while the model counts inventory in lots (each fill moves it by one). With 10-share orders the skew was ten times too strong: quotes sat on their safety clamps, and the maker pushed the price against its own position, which showed up as -8 ticks of adverse selection five steps after its fills. Counted in lots, those markouts turn positive and the maker runs near break-even, holding about a third of the naive maker's inventory. The model had been right all along; the units weren't.
+
+## Twelve times faster, twice as fast
+
+The Rust engine matches orders 12.7x faster than the Python one, and the market simulation built on it got about 2x faster. Rather than guess why, I measured it two ways. cProfile is easy but charges a fixed cost to every Python call, which distorts exactly this kind of question. So the benchmark also records every call the simulation makes on the book, replays them in a bare loop, and times the Python side separately against a stand-in that answers each call from the recording and does no work. The two halves add up to the whole: the book is about 48% of a run.
+
+That one number settles it. By Amdahl's law, an engine 12.7x faster at 48% of the work gives at most about 1.8x overall, and an infinitely fast one about 1.9x. Batching orders into one call per agent trims the cost of crossing from Python into Rust, but it can't move that ceiling. Only moving the agents themselves out of Python can. It's the cancel story again at a larger scale: measure where the time goes before deciding what to speed up.
+
 ## Honest limitations
 
 The things this does not do, since a half-built project described accurately is worth more than a finished one described loosely:
 
-- **No C++.** Rust covers the systems ground, but C++ is what most of these job specs ask for, and the differential harness would validate a third port for free.
+- **The agents are still Python.** The engine exists in three languages, but the simulated traders don't, which is why the simulation is only ~2x faster on Rust (see above).
 - **The matching engine is still single-threaded.** There is now a lock-free SPSC queue and a two-thread pipeline mode measured against a mutex baseline, but the deterministic single-threaded path remains what the differential test runs against, on purpose: an oracle has to be reproducible.
 - **Multi-symbol, but not multi-threaded across symbols.** There is an instrument registry and a venue that routes each symbol to its own book, but one thread serves all of them. Sharding symbols across threads is the obvious scaling step, since books don't interact.
 - **Live capture tested against a fake feed, not the real exchange.** A local websocket server speaking Binance's wire format, with a scripted sequence gap. It found a real bug on the first run: a closed socket raised an unhandled exception and killed the recorder, despite the module claiming to handle disconnects. What it does not cover is the real feed's rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
@@ -220,6 +234,6 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 ## What I would do next
 
-A C++ port. The semantics are now pinned by a differential test and the data-structure decisions are already made and documented, so a third implementation costs mostly syntax and gets validated for free by a harness that already exists. That is also the cheapest honest way to learn the language most of these job specs actually ask for.
+Move the simulator's agents into compiled code, since the measurement above says that's the only way past a ~1.9x end-to-end gain, and do it with the same discipline as the engine ports: a differential test that holds the Python agents as the oracle.
 
-After that, close the loop on the simulator. Its returns fail two stylized facts that real markets pass: they're predictable a step ahead, and there's no leverage effect. Replaying recorded Binance order books through the engine and running the same tests on them would show which agent behaviour is missing, and a simulator that fails a test you can name is a better starting point than one nobody has tested.
+After that, real data. The capture path for Kraken is built and checksum-verified against Kraken's own test vector; recording a few hours of BTC/USD and running the order-flow forecast and the stylized facts on it would show whether the forecast's skill in the simulator survives contact with a real book, and which missing mechanism (probably the leverage effect's asymmetry) the simulator should add next.

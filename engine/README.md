@@ -187,7 +187,7 @@ Event payloads:
 
 Being explicit, since a half-built project described honestly is worth more than a finished one described loosely:
 
-- **No C++.** Rust covers the systems ground, but most quant job specs ask for C++. The differential harness would validate a third port for free.
+- **The C++ port has no Python binding.** It's validated through the same op-file differential test as Rust, but only Rust is wired into the app.
 - **The matching engine itself is still single-threaded.** The lock-free queue and the two-thread pipeline exist and are tested, but the deterministic single-threaded path is what the differential test runs against, and that is deliberate: the oracle has to stay reproducible.
 - **Gradient-boosted trees.** Only logistic regression is implemented, deliberately, as a baseline. Trees need sklearn or lightgbm.
 - **No persistent FIX message store.** Sequence numbers and the resend store live in memory, so they don't survive a restart, and execution reports for a logged-out client are dropped rather than queued. A production engine would persist both, plus TLS and scheduled sessions.

@@ -16,7 +16,7 @@ tuple for tuple except the timestamp (ts is process-local; seq is not and is
 compared). Book state is compared at checkpoints.
 
 Skips cleanly (exit 0) when the extension is not built:
-    cd rust; maturin develop --release
+    cd rust; python -m pip install .
 """
 
 import random
@@ -123,7 +123,7 @@ def demo():
         if os.environ.get("BULLPEN_REQUIRE_RUST") == "1":
             raise
         print("skip test_pyo3: bullpen_engine not built "
-              "(cd engine/rust; maturin develop --release)")
+              "(cd engine/rust; python -m pip install .)")
         return
     n = run(RustBook)
     print(f"ok — {N_OPS} ops, {n} events identical between Python and Rust (PyO3)")

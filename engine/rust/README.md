@@ -28,16 +28,15 @@ Both engines assign order ids sequentially, so identical input produces identica
 
 The same engine builds as a Python module, `bullpen_engine`, exposing the portable book interface from SPEC.md section 7.1. `engine/fastbook.py` then hands out the Rust `Book` automatically, falling back to the Python one when the module is not installed (or when `BULLPEN_ENGINE=python` is set).
 
-From `engine/rust`, inside the virtualenv the app uses:
+From `engine/rust`:
 
 ```
-pip install maturin
-maturin develop --release
+python -m pip install .
 python ../test_pyo3.py
 python ../fastbook.py
 ```
 
-`maturin develop` compiles with `--features python` and installs the module into the active environment. `test_pyo3.py` drives 20,000 random ops through both engines and compares every event tuple; it skips (exit 0) if the module is not built. The wheel uses Python's stable ABI (`abi3`), so one build works on CPython 3.9 and newer.
+`pip install .` reads `pyproject.toml`, fetches maturin into a temporary build environment, compiles with `--features python` in release mode, and installs the module. That sidesteps two common snags: a `maturin` command that isn't on PATH, and `maturin develop` refusing to run outside a virtualenv. Inside a virtualenv, `maturin develop --release` does the same thing faster on rebuilds. `test_pyo3.py` drives 20,000 random ops through both engines and compares every event tuple; it skips (exit 0) if the module is not built. The wheel uses Python's stable ABI (`abi3`), so one build works on CPython 3.9 and newer.
 
 Do not run `cargo test --features python`: the `extension-module` setting deliberately leaves libpython unlinked, so a test binary cannot link. Plain `cargo test` is unaffected.
 

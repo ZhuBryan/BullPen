@@ -1,0 +1,5 @@
+# Everything needed to run the tests, on top of what the app itself needs.
+-r requirements.txt
+websockets   # live-capture test (engine/test_capture_live.py)
+httpx2       # FastAPI's TestClient needs it from Starlette 1.x on
+maturin>=1.7,<2   # builds the Rust engine as a Python module

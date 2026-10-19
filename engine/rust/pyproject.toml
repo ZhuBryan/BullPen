@@ -1,6 +1,6 @@
 # Builds the Rust engine as a Python extension module with maturin.
-#   pip install maturin
-#   maturin develop --release      (installs into the active virtualenv)
+#   python -m pip install .        (from this folder; pip fetches maturin itself)
+# or, inside a virtualenv: maturin develop --release
 # Then `import bullpen_engine` works and engine/fastbook.py picks it up.
 
 [build-system]

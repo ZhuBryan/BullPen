@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt websockets
+      - run: pip install -r requirements-dev.txt
       - name: Engine self-checks
         working-directory: engine
         run: python test.py
@@ -87,7 +87,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt "maturin>=1.7,<2"
+      - run: pip install -r requirements-dev.txt
       - name: Build the Rust engine as a Python extension
         working-directory: engine/rust
         run: |
@@ -103,9 +103,7 @@ jobs:
         working-directory: engine
         env:
           BULLPEN_REQUIRE_RUST: "1"
-        run: |
-          pip install websockets
-          python test.py
+        run: python test.py
       - name: Whole backend suite on the Rust book
         run: |
           python backend/test_bullpen.py

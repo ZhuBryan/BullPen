@@ -30,7 +30,9 @@ cd rust
 cargo test              # the Rust port
 ```
 
-To run the app on the Rust engine, build the Python extension once (`pip install maturin`, then `maturin develop --release` inside `engine/rust`). Without it everything still works on the Python engine.
+To run the app on the Rust engine, build the Python extension once: inside `engine/rust`, run `python -m pip install .` (pip fetches maturin and compiles the Rust for you). Without it everything still works on the Python engine.
+
+To run the tests yourself, install the test dependencies first: `pip install -r requirements-dev.txt`.
 
 On Windows PowerShell, run these as separate lines; older PowerShell doesn't accept `&&`.
 

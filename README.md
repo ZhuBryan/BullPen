@@ -6,9 +6,11 @@ Two halves. A limit order book exchange built from scratch, and a research platf
 
 **The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to Rust. The two are differential-tested: fed identical order streams, they produce byte-identical event logs, and the Rust version runs **12.7x faster (3.4M orders/sec) with 13x lower p99.9 latency**.
 
-Around it sits the rest of a trading stack: **FIX 4.4 order entry** and an OMS with cancel/replace and average-cost PnL, **pre-trade risk** (price collars, position limits, self-trade prevention), **instrument reference data** with Reg NMS tick regimes and multi-symbol routing, a **lock-free SPSC queue** for the feed-to-matcher handoff, **live Binance L2 capture** with sequence-gap detection and resync, **execution algorithms** (TWAP, VWAP, POV) scored by implementation shortfall, a **research pipeline** with purged walk-forward validation, and **latency histograms** exposed as Prometheus text.
+Around it sits the rest of a trading stack: **FIX 4.4 over TCP** with a real session layer (heartbeats, sequence-gap recovery, resend and gap fill) feeding an OMS with cancel/replace and average-cost PnL, **pre-trade risk** (price collars, position limits, self-trade prevention), **instrument reference data** with Reg NMS tick regimes and multi-symbol routing, a **lock-free SPSC queue** for the feed-to-matcher handoff, **live Binance L2 capture** with sequence-gap detection and resync, **execution algorithms** (TWAP, VWAP, POV) scored by implementation shortfall, an **Avellaneda-Stoikov market maker**, and **latency histograms** exposed as Prometheus text.
 
-**The platform** is a paper-trading arena and backtester: write trading rules in plain English or a small safe DSL, race strategies against each other, and stress-test them with a parameter optimizer, walk-forward validation, Monte Carlo, and a market-regime detector.
+The Rust engine isn't only a benchmark: it's exposed to Python through **PyO3**, and the app's simulator runs on it whenever the extension is built. **CI** builds it on every push, proves it matches the Python engine event for event, and then reruns the whole backend test suite on top of it.
+
+**The platform** is a paper-trading arena and research workbench: write trading rules in plain English or a small safe DSL, race strategies against each other, and stress-test them with a parameter optimizer, walk-forward validation, Monte Carlo, and a market-regime detector. Backtests can fill against a modelled **order book** instead of the closing price, multi-asset **portfolios** get proper risk numbers (VaR, CVaR, beta, factor exposure), and a **stylized-facts** check asks whether the simulated market behaves like a real one.
 
 No paid APIs, no API keys. Free Yahoo Finance data with a synthetic offline fallback.
 
@@ -23,9 +25,14 @@ The engine and its tests (standard library plus numpy):
 ```bash
 cd engine
 python test.py          # every self-check
-python bench.py         # throughput and tail latency
-cd rust && cargo test   # the Rust port
+python bench.py         # throughput and tail latency, 5 repeats with spread
+cd rust
+cargo test              # the Rust port
 ```
+
+To run the app on the Rust engine, build the Python extension once (`pip install maturin`, then `maturin develop --release` inside `engine/rust`). Without it everything still works on the Python engine.
+
+On Windows PowerShell, run these as separate lines; older PowerShell doesn't accept `&&`.
 
 The web platform:
 
@@ -57,6 +64,19 @@ The indicators you can use are `CLOSE`, `SMA(n)`, `EMA(n)`, `RSI(n)`, and `MOM(n
 ## Lab tab: backtest a strategy on history
 
 Pick a ticker and date range, choose a built-in strategy (Buy and Hold, SMA Crossover, RSI Mean Reversion, Bollinger Bands, or Momentum) or write custom rules with the same language as the Arena. You get a candlestick price chart with your buy and sell points marked, an equity curve against buy and hold, a drawdown chart, a monthly returns heatmap, and the key metrics below.
+
+**Fills: close or order book.** The default fills every trade at the close, which is the usual idealization. Switch to *Order book* and each signal is sent as a market order at the next day's open into a book built from that day's spread and trailing volume, so a big order walks the book and pays impact. You get per-trade transaction cost analysis and the gap versus close fills split into four parts that add up exactly:
+
+| Part | What it isolates |
+|---|---|
+| Timing | Trading at the next open instead of the signal day's close, with no frictions at all |
+| Rounding | Buying whole shares instead of fractions |
+| Cost | Spread and impact actually paid |
+| Capacity | Size the book couldn't absorb (or "other" when every order filled) |
+
+The split matters because the raw gap can mislead. On a losing strategy, an account too big to get filled can look like it did *better* than close fills; here that shows up as capacity, not as cheap execution.
+
+One caveat applies to every backtest here: the tickers you pick are today's survivors. Companies that went bust aren't in the list, which flatters any strategy that buys and holds.
 
 ## Analysis tab: go beyond a single backtest
 
@@ -96,6 +116,25 @@ A few limitations worth being honest about:
 
 Run one strategy across up to six tickers at once on a shared date range. You get all their equity curves on one chart, a summary metrics table, and a return-correlation heatmap that shows how closely each pair moves together day to day. Low correlations are the ones that actually diversify risk.
 
+## Portfolio tab: several assets at once
+
+Pick 2 to 10 tickers and a sizing scheme:
+
+- **Equal weight**: the naive baseline that's famously hard to beat.
+- **Inverse volatility**: calmer assets get more money, so each moves the account by a similar amount.
+- **Volatility target**: inverse-vol weights scaled so the forecast portfolio volatility hits a target. It never borrows, so in calm markets it just holds cash.
+- **Risk parity**: every asset contributes the same share of total risk, solved exactly (including when assets are negatively correlated, which a common shortcut gets wrong).
+
+Weights are decided with data up to day T and held from T+1, rebalanced monthly or weekly. Results include the equity curve against equal-weight buy and hold, weights over time, historical and parametric VaR and CVaR at 95% and 99%, beta to SPY, a factor regression on free ETF proxies (market, size, value, momentum) with t-stats, the correlation matrix, and each asset's share of portfolio risk.
+
+## Engine tab: a market that produces its own prices
+
+- **Simulated market.** Agents (market makers, momentum and mean-reversion traders, noise traders) post orders into the matching engine and trade with each other. Closed-economy invariants are checked every step: shares and cash are conserved, the book never crosses.
+- **Execution and TCA.** Work a parent order with TWAP, VWAP, or POV against that live book and score it by implementation shortfall.
+- **Market making.** An Avellaneda-Stoikov maker, which skews its quotes against its inventory, runs head to head with a naive symmetric one on the same market. Profit splits exactly into spread capture and inventory PnL. In this calm market A-S holds about 6.7x less inventory but makes less money: reducing risk has a price, and here the risk was cheap.
+- **Stylized facts.** Real returns and the simulator's returns are tested against five well-documented properties of markets: heavy tails, no linear autocorrelation, volatility clustering, aggregational Gaussianity, and the leverage effect. The simulator honestly fails two of them (its returns are autocorrelated, and it has no leverage effect), which is the point of testing it.
+- **Research agent.** Searches strategy variants and then discounts its own best result with the Deflated Sharpe Ratio, because search enough variations and one will look brilliant by luck.
+
 ## engine/: the matching engine underneath
 
 Everything above treats prices as something that already happened. `engine/` is the other half: a limit order book exchange built from scratch, where prices are produced rather than downloaded.
@@ -104,6 +143,8 @@ Everything above treats prices as something that already happened. `engine/` is 
 - **Live capture** of Binance L2 depth and trades over the public websocket, including the snapshot/diff handshake and sequence-gap detection that keep a local book honest.
 - **Replay with queue position**, so a backtest asks "would my order actually have filled, given the 400 shares queued ahead of it" instead of assuming a fill at mid.
 - **Purged walk-forward research**, which drops training rows whose labels overlap the test window. Ordinary k-fold leaks here and inflates every metric.
+- **FIX 4.4 session layer** over TCP: logon, heartbeats and test requests, sequence-gap detection with resend requests, gap fills for admin messages, possible-duplicate replays, and checksum-validated framing. Order messages go to the OMS and execution reports come back. It's hardened against hostile clients: no cross-client cancels, no session hijacking, bounded resends and queues.
+- **Rust through PyO3**, with the same portable interface as the Python book, so the simulator and order-book backtester run on either engine unchanged.
 
 ```bash
 cd engine
@@ -112,6 +153,17 @@ python bench.py    # throughput and tail latency
 ```
 
 See `engine/README.md` for the benchmark methodology and the before/after numbers, including the profiling mistake that led to the 28x tail-latency fix.
+
+## How it's tested
+
+[GitHub Actions](.github/workflows/ci.yml) runs on every push:
+
+- every engine self-check and 460+ endpoint checks, on deterministic synthetic data so a slow Yahoo can't fail the build;
+- `cargo test` and the Python-vs-Rust differential test on 20,000 orders, on both Linux and Windows;
+- a build of the PyO3 extension, a 20,000-op comparison through it (which fails, rather than skips, if the extension is missing), and the entire backend suite rerun with the Rust book underneath;
+- on main, benchmarks for both engines and criterion, uploaded as artifacts rather than asserted, because shared runners make timing thresholds flaky.
+
+Every module also carries its own self-check, including negative controls: the stylized-facts tests must *fail* on Gaussian noise, and the research critic must reject strategies found in pure noise.
 
 ## The metrics, in plain English
 
@@ -140,10 +192,16 @@ A signal computed from today's close can only be traded tomorrow. The engine shi
 | `backend/regime.py` | Market regime detector: rolling features, affinity-matrix classifier, feature attributions |
 | `backend/arena.py` | The live arena: replay clock, default fighters, leaderboard, agent persistence |
 | `backend/main.py` | FastAPI server and all JSON API endpoints |
-| `frontend/index.html` | The web UI: Arena, Lab, Analysis, Regime, and Compare tabs, built with Chart.js and vanilla JS |
+| `backend/book_backtest.py` | Order-book backtests: next-open market orders against a modelled book, per-trade TCA, the timing/rounding/cost/capacity split |
+| `backend/portfolio.py` | Multi-asset backtests with sizing schemes, VaR/CVaR, beta, factor exposure, risk contributions |
+| `backend/market_sim.py` | The agent-based market, including the Avellaneda-Stoikov maker and its PnL decomposition |
+| `backend/stylized.py` | Stylized-facts tests for real and simulated returns |
+| `backend/exec_sim.py` | Works parent orders through the simulated market and scores them |
+| `frontend/index.html` | The web UI: Arena, Lab, Analysis, Regime, Compare, Portfolio, and Engine tabs, built with Chart.js and vanilla JS |
 | `backend/ai.py` | Turns a plain-English strategy description into validated rules, using your own API key or a local model |
 | `backend/test_bullpen.py` | Plain-Python test suite, run with `python backend/test_bullpen.py` |
-| `engine/` | The matching engine, live capture, queue-position replay, and research pipeline |
+| `engine/` | The matching engine (Python and Rust), FIX session layer, OMS, risk, execution algos, live capture, queue-position replay, and research pipeline |
+| `.github/workflows/ci.yml` | CI: Python checks, Rust tests and the differential test on Linux and Windows, the PyO3 build, benchmarks |
 
 ## Roadmap
 
@@ -154,3 +212,11 @@ A signal computed from today's close can only be traded tomorrow. The engine shi
 5. ~~Parameter optimizer, walk-forward validation, and Monte Carlo simulation~~ (done)
 6. ~~Market regime detector with explainability and regime-gated backtesting~~ (done)
 7. ~~Candlestick charts, volume, and a multi-ticker correlation heatmap~~ (done)
+8. ~~CI on every push, including the Rust engine and the differential test~~ (done)
+9. ~~The Rust engine inside the app through PyO3~~ (done)
+10. ~~Order-book backtests with transaction cost analysis~~ (done)
+11. ~~Avellaneda-Stoikov market maker and stylized-facts validation of the simulator~~ (done)
+12. ~~Portfolio layer: sizing, VaR/CVaR, factor exposure~~ (done)
+13. ~~FIX session layer over TCP and repeatable benchmarks~~ (done)
+14. Replay recorded Binance order books through the engine, and compare their stylized facts with the simulator's
+15. Fix the simulator's autocorrelated returns, the main fact it fails

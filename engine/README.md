@@ -5,7 +5,7 @@ A limit order book exchange simulator and microstructure research framework, bui
 The pieces, each usable on its own:
 
 1. **Matching engine** with correct price-time priority, in Python and Rust
-2. **FIX 4.4 order entry** and an OMS with cancel/replace and average-cost PnL
+2. **FIX 4.4 order entry over TCP**, with a real session layer, feeding an OMS with cancel/replace and average-cost PnL
 3. **Pre-trade risk**: size, price collars, position limits, self-trade prevention
 4. **Instrument reference data** and multi-symbol routing (Reg NMS tick regimes)
 5. **Live capture** of real exchange order book data
@@ -13,6 +13,7 @@ The pieces, each usable on its own:
 7. **Execution algorithms** (TWAP, VWAP, POV) with implementation-shortfall TCA
 8. **Research pipeline** with purged walk-forward validation
 9. **Metrics**: latency histograms and counters, Prometheus exposition
+10. **Python bindings for the Rust engine** (PyO3), so the rest of the project can run on it
 
 The Python side is standard library plus numpy; the Rust port is standard library only. No API keys, no paid data, no framework.
 
@@ -20,8 +21,9 @@ The Python side is standard library plus numpy; the Rust port is standard librar
 
 ```bash
 python test.py                    # run every self-check (incl. live capture)
-python bench.py                   # benchmark the engine
+python bench.py                   # benchmark the engine (5 repeats, median and spread)
 python bench.py --quick           # faster pass
+python bench.py --repeats 9 --json out.json   # machine-readable, as CI archives it
 
 pip install websockets            # only needed for live capture
 python capture.py --live BTCUSDT 300   # record 5 minutes of real book data
@@ -41,7 +43,7 @@ Each module also runs its own checks directly: `python orderbook.py`, `python ca
 | p99.9 latency | 771,027 ns | 64,270 ns | 12x |
 | ops over 20us | 13.2% | 0.9% | |
 
-**Methodology.** Warmup runs are discarded. Throughput is measured as total wall time over N operations, so no per-operation timer overhead contaminates it. Latency percentiles are measured per operation with `perf_counter_ns`, whose median overhead is about 100ns on this machine and is reported alongside the results, so anything near that floor is measuring the clock rather than the engine. The order stream is generated from a fixed seed, so a future compiled rewrite can be compared on identical input.
+**Methodology.** Each figure is the median of repeated runs (5 by default), reported with its min-max range and interquartile range, so a single lucky run can't be quoted. Any latency percentile within twice the measured timer overhead is flagged "at timer floor, do not quote". Warmup runs are discarded. Throughput is measured as total wall time over N operations, so no per-operation timer overhead contaminates it. Latency percentiles are measured per operation with `perf_counter_ns`, whose median overhead is about 100ns on this machine and is reported alongside the results, so anything near that floor is measuring the clock rather than the engine. The order stream is generated from a fixed seed, so a future compiled rewrite can be compared on identical input.
 
 ## Rust vs Python
 
@@ -112,6 +114,14 @@ are tested here:
   remainder at the fill price. Blending them into one average misstates both
   realized and unrealized PnL.
 
+### The FIX session layer
+
+`fix_session.py` is the part that makes FIX usable over a real socket. TCP is a byte stream, so messages are framed by reading `8=FIX.4.4`, then the BodyLength, then exactly that many bytes, then the checksum trailer. A garbled message is discarded without consuming a sequence number.
+
+Every message carries a sequence number in both directions. When an incoming number skips ahead, the receiver sends a ResendRequest for the gap and holds what arrived early. The sender replays business messages with PossDupFlag=Y and their original sending time, and replaces runs of admin messages (heartbeats, test requests) with a single SequenceReset-GapFill. Replaying a stale heartbeat is pointless; replaying a stale order is dangerous, which is why the duplicate flag exists, and why the OMS rejecting a duplicate ClOrdID is what makes replays safe. A number that's too low *without* the duplicate flag is a serious error and ends the session. Idle sides heartbeat, a silent peer gets a TestRequest, and no answer means disconnect.
+
+The acceptor routes NewOrderSingle, cancel and cancel/replace into the OMS and sends execution reports back to whichever session owns the order. Review found real holes here, all now closed and regression-tested: a rejected duplicate ClOrdID used to steal ownership of the original (letting one client cancel another's order and receive its reports), a ResendRequest with a negative start froze every session on the shared event loop, a second Logon for a connected CompID hijacked the live session, and malformed fields killed the read loop.
+
 ## Execution algorithms and TCA
 
 `execution.py` has TWAP, VWAP (largest-remainder allocation, so slices conserve
@@ -172,9 +182,7 @@ Being explicit, since a half-built project described honestly is worth more than
 - **No C++.** Rust covers the systems ground, but most quant job specs ask for C++. The differential harness would validate a third port for free.
 - **The matching engine itself is still single-threaded.** The lock-free queue and the two-thread pipeline exist and are tested, but the deterministic single-threaded path is what the differential test runs against, and that is deliberate: the oracle has to stay reproducible.
 - **Gradient-boosted trees.** Only logistic regression is implemented, deliberately, as a baseline. Trees need sklearn or lightgbm.
-- **No FIX session layer.** `fix.py` is the wire format and the business
-  messages, not logon, sequence-number recovery, resend requests or heartbeats.
-  Those are a separate problem and a less interesting one.
+- **No persistent FIX message store.** Sequence numbers and the resend store live in memory, so they don't survive a restart, and execution reports for a logged-out client are dropped rather than queued. A production engine would persist both, plus TLS and scheduled sessions.
 - **Parquet storage.** Capture writes gzipped JSONL. Columnar storage earns its place at analysis scale, not at capture time.
 - **A capture run against *real* Binance traffic.** The live socket path is now tested end to end, but against a local fake feed (`test_capture_live.py`), not the real exchange. That test stands up an actual websocket server and HTTP snapshot endpoint on localhost, scripts a deliberate sequence gap, and asserts the gap is caught, a resync snapshot follows, the trade stream is routed, a dropped socket is survived, and the gzip file round-trips. It found a real bug on first run: a closed socket raised an unhandled `ConnectionClosedOK` and killed the recorder, so `record()` now reconnects with exponential backoff and re-snapshots on every reconnect (mandatory, since the book moved while the socket was down). What remains untested is the real feed's quirks: rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
 
@@ -193,14 +201,19 @@ replay.py      book reconstruction, queue-position fills, microstructure feature
 research.py    labels, purged walk-forward CV, baseline model, cost-aware metrics
 risk.py        pre-trade checks: size, value, price collar, position, self-trade
 fix.py         FIX 4.4 encode/decode, builders, order state machine
+fix_session.py FIX session layer over TCP: logon, heartbeats, gap recovery, acceptor -> OMS
 oms.py         order lifecycle, cancel/replace, average-cost positions and PnL
 execution.py   TWAP/VWAP/POV scheduling and transaction cost analysis
 instruments.py tick regimes, lot rules, multi-symbol Venue
 metrics.py     latency histograms, counters, Prometheus text
 bench.py       throughput and tail latency harness
 diff_test.py   proves the Rust engine matches this one, event for event
+fastbook.py    picks the Rust book when its Python extension is built, else this one
+test_pyo3.py   20,000 random ops through both engines via PyO3, every event compared
 test.py        runs every self-check
 test_capture_live.py  live capture against a local fake Binance feed
 rust/          the compiled port: same semantics, 12.7x throughput
 rust/src/spsc.rs  lock-free SPSC queue for the feed -> matcher handoff
+rust/src/py.rs    PyO3 binding (built only with the `python` feature)
+rust/bench/       criterion benchmarks, a separate crate so the engine stays dependency-free
 ```

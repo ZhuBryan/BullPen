@@ -25,17 +25,19 @@ ran = len(MODULES)
 # the sequencing logic it covers is already tested offline in capture.py.
 try:
     import websockets  # noqa: F401
-    live = importlib.import_module("test_capture_live")
 except ImportError:
-    print("skip test_capture_live (pip install websockets to enable)")
+    print("skip live capture tests (pip install websockets to enable)")
 else:
-    ran += 1
-    try:
-        asyncio.run(live.main())
-    except Exception:
-        failed.append("test_capture_live")
-        print("FAIL test_capture_live")
-        traceback.print_exc()
+    # Both exchanges, each against a local fake server: Binance (sequence-gap
+    # resync) and Kraken (CRC32 checksum resync).
+    for name in ("test_capture_live", "test_kraken_live"):
+        ran += 1
+        try:
+            asyncio.run(importlib.import_module(name).main())
+        except Exception:
+            failed.append(name)
+            print(f"FAIL {name}")
+            traceback.print_exc()
 
 print(f"\n{ran - len(failed)}/{ran} passed")
 sys.exit(1 if failed else 0)

@@ -129,6 +129,15 @@ class MakerRequest(BaseModel):
     horizon: int = Field(default=5, ge=1, le=100)
 
 
+class ForecastRequest(BaseModel):
+    steps: int = Field(default=2000, ge=500, le=5_000)
+    seed: int = 7
+    horizon: int = Field(default=5, ge=1, le=50)      # steps ahead to forecast
+    kappa: float = Field(default=1.0, ge=-10, le=10)  # how hard the maker leans on it
+    gamma: float = Field(default=0.1, gt=0, le=10)
+    k: float = Field(default=1.5, gt=0, le=50)
+
+
 class StylizedRequest(BaseModel):
     ticker: str = "SPY"
     start: str = "2015-01-01"
@@ -513,6 +522,19 @@ def sim_maker(req: MakerRequest):
                         inventory_limit=req.inventory_limit, horizon=req.horizon)
     APP_METRICS.incr("sim.maker_runs")
     return out
+
+
+@app.post("/api/sim/forecast")
+def sim_forecast(req: ForecastRequest):
+    """Order-flow forecast quality (out of sample, with a negative control) and
+    three makers on the same market: naive, A-S, and A-S leaning on the forecast."""
+    from backend.forecast import run as forecast_run
+    try:
+        with APP_METRICS.timer("sim.forecast"):
+            return forecast_run(steps=req.steps, seed=req.seed, horizon=req.horizon,
+                                kappa=req.kappa, gamma=req.gamma, k=req.k)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/stylized")

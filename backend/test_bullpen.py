@@ -1125,6 +1125,18 @@ r = _c.post("/api/backtest", content=b'{"ticker": "SPY", "starting_cash": Infini
             headers={"Content-Type": "application/json"})
 check(r.status_code == 422, f"starting_cash=Infinity -> 422 (got {r.status_code})")
 
+# Order-flow forecast endpoint
+_f = _c.post("/api/sim/forecast", json={"steps": 800, "seed": 3})
+check(_f.status_code == 200, f"/api/sim/forecast -> 200 (got {_f.status_code})")
+_fj = _f.json()
+check({"naive", "avellaneda_stoikov", "forecast_maker"} <= set(_fj["makers"]),
+      "forecast compares three makers on one market")
+for _name, _m in _fj["makers"].items():
+    check(abs(_m["spread_capture"] + _m["inventory_pnl"] - _m["total_pnl"]) < 0.01,
+          f"{_name}: PnL identity holds")
+check("negative_control" in _fj["forecast"]["by_horizon"]["5"], "forecast reports a negative control")
+check(_c.post("/api/sim/forecast", json={"steps": 10**6}).status_code == 422, "forecast steps bounded -> 422")
+
 # Metrics expose which engine is serving, and book backtests are timed
 text = metrics_endpoint().body.decode()
 check('bullpen_engine_info{engine="' in text, "metrics report the matching engine in use")

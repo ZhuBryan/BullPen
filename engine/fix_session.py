@@ -46,6 +46,8 @@ except ImportError:
 
 BEGIN = f"8={fix.BEGIN_STRING}{fix.SOH}".encode()
 MAX_BODY = 1 << 16          # refuse absurd BodyLength values instead of allocating them
+MAX_QUEUE = 10_000          # out-of-order messages held while a gap fills; a peer
+                            # that sends ever-higher seq numbers can't grow memory forever
 HEADER_TAGS = {8, 9, 10, 35, 49, 56, 34, 52, 43, 122}
 
 # Session-level (admin) message types.
@@ -163,6 +165,10 @@ class Session:
 
     def _resend(self, begin, end):
         last = self.out_seq - 1
+        if begin < 1 or begin > last or (end != 0 and end < begin):
+            # Without this a BeginSeqNo of -10**12 would loop on the event loop
+            # every session shares, freezing the whole venue.
+            return self.send_reject(0, f"invalid resend range {begin}..{end}", reason=5)
         end = last if end == 0 or end > last else end     # EndSeqNo 0 means "everything"
         self._log(f"resending {begin}..{end}")
         gap = None
@@ -224,7 +230,15 @@ class Session:
                     self.garbled += 1
                     self._log(f"discarded garbled message: {e}")
                     continue
-                self._on_message(msg)
+                try:
+                    self._on_message(msg)
+                except (KeyError, ValueError) as e:
+                    # A well-framed message with a missing or non-numeric field
+                    # (108=abc, SequenceReset without 36, ...). Reject it with
+                    # reason 6 (incorrect data format) instead of letting the
+                    # exception kill this session's read loop.
+                    self.send_reject(msg["fields"].get(34, 0),
+                                     f"malformed field: {type(e).__name__} {e}", reason=6)
         except (asyncio.IncompleteReadError, ConnectionError, asyncio.LimitOverrunError):
             pass
         finally:
@@ -256,7 +270,12 @@ class Session:
         if msg_type == SEQUENCE_RESET and f.get(123) != "Y":
             # Reset mode: an administrative override, seq number of this
             # message itself is ignored by definition.
-            self.in_seq = int(f[36])
+            new = int(f[36])
+            if new < self.in_seq:
+                # Spec: NewSeqNo below the expected number is an error; applying
+                # it would make us accept replays of messages already processed.
+                return self.send_reject(seq, "NewSeqNo below expected", reason=5)
+            self.in_seq = new
             return
         if seq < self.in_seq:
             if f.get(43) == "Y":
@@ -266,6 +285,8 @@ class Session:
             # Logon and ResendRequest are acted on immediately even when out of
             # order: if both sides waited for their own gap to fill before
             # servicing the peer's ResendRequest, they would deadlock.
+            if len(self.queue) >= MAX_QUEUE:
+                return self._fatal("too many out-of-order messages")
             handled = msg_type in (LOGON, RESEND_REQUEST)
             if handled:
                 self._dispatch(msg)
@@ -371,6 +392,12 @@ class AcceptorSession(Session):
         reset = f.get(141) == "Y"
         if reset:
             self.out_seq, self.store = 1, {}
+        live = self.venue.sessions.get(self.target)
+        if live is not None and live is not self and not live.closed.is_set():
+            # A second Logon for a CompID that is already connected: refuse the
+            # newcomer and leave the live session alone. Otherwise anyone who
+            # knows a CompID could take over that client's execution reports.
+            return self.close(f"duplicate Logon for {self.target}: session already active")
         self.venue.sessions[self.target] = self
         self.send(LOGON, [(98, 0), (108, self.hb)] + ([(141, "Y")] if reset else []))
         self.logged_on.set()
@@ -411,13 +438,20 @@ class Acceptor:
             if t == fix.MsgType.NEW_ORDER_SINGLE:
                 # Prices inside the engine are integer ticks, and so on this wire.
                 price = None if f.get(40) == fix.OrdType.MARKET else int(f[44])
-                self.owner[f[11]] = sess.target
                 rpts = self.oms.new_order(f[11], f[54], int(f[38]), price, account=sess.target)
-            elif t == fix.MsgType.ORDER_CANCEL_REQUEST:
-                rpts = self.oms.cancel(f[11], f[41])
-            elif t == fix.MsgType.ORDER_CANCEL_REPLACE_REQUEST:
+                # Ownership is recorded only once the OMS accepted the order: a
+                # rejected duplicate ClOrdID must not steal the original's owner.
                 self.owner[f[11]] = sess.target
-                rpts = self.oms.replace(f[11], f[41], int(f[38]), int(f[44]), account=sess.target)
+            elif t in (fix.MsgType.ORDER_CANCEL_REQUEST, fix.MsgType.ORDER_CANCEL_REPLACE_REQUEST):
+                # A client may only touch its own orders.
+                if self.owner.get(f[41]) != sess.target:
+                    raise ValueError(f"unknown order {f[41]}")
+                if t == fix.MsgType.ORDER_CANCEL_REQUEST:
+                    rpts = self.oms.cancel(f[11], f[41])
+                else:
+                    rpts = self.oms.replace(f[11], f[41], int(f[38]), int(f[44]),
+                                            account=sess.target)
+                self.owner[f[11]] = sess.target
             else:
                 return sess.send_reject(seq, f"unsupported MsgType {t}", reason=11)
         except (KeyError, ValueError, fix.FixError) as e:
@@ -505,7 +539,7 @@ def _types(sess, t, tags=None):
 
 async def _demo():
     t0 = time.monotonic()
-    venue = Acceptor(OMS(symbol="TEST"), clients={"CLIENT1", "CLIENT2", "CLIENT3"})
+    venue = Acceptor(OMS(symbol="TEST"), clients={"CLIENT1", "CLIENT2", "CLIENT3", "CLIENT4"})
     port = await venue.start()
 
     # (1) logon handshake: both sides start at 1, Logon consumes seq 1 each way
@@ -623,6 +657,38 @@ async def _demo():
     assert hung_acc.close_reason == "no response to TestRequest", hung_acc.close_reason
     assert _types(hung, TEST_REQUEST)
     print(f"  (5) silent peer disconnected: {hung_acc.close_reason}")
+
+    # (8) hostile client. Each attack below was a real bug found in review.
+    cli.send_order("B9", fix.Side.BUY, 10, price=9_000)          # rests, far from the market
+    assert (await cli.next_report())["ClOrdID"] == "B9"
+    evil = await Initiator.connect("127.0.0.1", port, "CLIENT4", "VENUE", hb=1)
+    n_rej = lambda: len(_types(evil, REJECT))
+    evil.send_order("B9", fix.Side.BUY, 1, price=9_000)           # duplicate ClOrdID
+    await _until(lambda: n_rej() >= 1, what="duplicate rejected")
+    evil.cancel("X1", "B9", fix.Side.BUY, 10)                     # someone else's order
+    await _until(lambda: n_rej() >= 2, what="foreign cancel rejected")
+    assert venue.owner["B9"] == "CLIENT1", "a rejected duplicate must not steal ownership"
+    assert not venue.oms.orders["B9"].is_terminal, "another client cancelled B9"
+    try:
+        await cli.next_report(timeout=0.3)
+        raise AssertionError("victim received a report it should not have")
+    except asyncio.TimeoutError:
+        pass
+    t_resend = time.monotonic()
+    evil.send(RESEND_REQUEST, [(7, -3_000_000), (16, 0)])          # used to freeze the venue
+    await _until(lambda: n_rej() >= 3, what="negative resend rejected")
+    assert time.monotonic() - t_resend < 1.0
+    evil.send(RESEND_REQUEST, [(7, "abc"), (16, 0)])               # used to kill the session
+    await _until(lambda: n_rej() >= 4, what="malformed field rejected")
+    assert not evil.closed.is_set() and not venue.sessions["CLIENT4"].closed.is_set()
+    r, w = await asyncio.open_connection("127.0.0.1", port)         # duplicate logon as CLIENT1
+    w.write(fix.encode(LOGON, [(52, utc_now()), (98, 0), (108, 1)], "CLIENT1", "VENUE", 1).encode())
+    assert await asyncio.wait_for(r.read(), 2) == b"", "duplicate logon must be refused"
+    w.close()
+    assert venue.sessions["CLIENT1"] is acc and not acc.closed.is_set()
+    await evil.logout()
+    print("  (8) hostile client contained: duplicate ClOrdID, foreign cancel, negative and "
+          "malformed resend, duplicate logon")
 
     # (7) clean logout: 5 out, 5 back, both sides closed
     await cli.logout("done for the day")

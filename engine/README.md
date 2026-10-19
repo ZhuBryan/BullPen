@@ -4,11 +4,11 @@ A limit order book exchange simulator and microstructure research framework, bui
 
 The pieces, each usable on its own:
 
-1. **Matching engine** with correct price-time priority, in Python and Rust
+1. **Matching engine** with correct price-time priority, in Python, Rust and C++17 (all three differential-tested)
 2. **FIX 4.4 order entry over TCP**, with a real session layer, feeding an OMS with cancel/replace and average-cost PnL
 3. **Pre-trade risk**: size, price collars, position limits, self-trade prevention
 4. **Instrument reference data** and multi-symbol routing (Reg NMS tick regimes)
-5. **Live capture** of real exchange order book data
+5. **Live capture** of real exchange order book data from Kraken (checksum-verified) and Binance (sequence-verified)
 6. **Replay and fill simulation** that models queue position instead of pretending you fill at mid
 7. **Execution algorithms** (TWAP, VWAP, POV) with implementation-shortfall TCA
 8. **Research pipeline** with purged walk-forward validation
@@ -93,6 +93,14 @@ Measured on a 20,000-op file (single run, Windows, release build):
 | `Mutex<VecDeque>` | 2.10M ops/sec | 24,065 |
 
 That's a 1.19x gain, which is smaller than you might expect, and the backpressure counter explains why. The producer hit a full queue 132,821 times while pushing 20,000 ops, about 6.6 retries per op. So the feed thread spent most of its time waiting for the matcher, not fighting over a lock. The queue isn't the bottleneck at this rate, so 1.19x is a floor on the difference rather than its size. It would widen with a cheaper consumer or a burstier producer. The run is also too short (8ms) to quote with any precision, so I'm reporting it as measured rather than as a headline.
+
+## Two ways to keep a book honest: Binance and Kraken
+
+Kraken is the second live source, added because Binance is unavailable from Canada and the US. `python capture.py --live kraken BTC/USD 3600` subscribes to Kraken's WebSocket v2 book (depth 10) and trade channels and writes the same gzip JSONL records as the Binance path, so replay and research work on either.
+
+The two exchanges protect book integrity in opposite ways. Binance numbers every update, so a missing number tells you that you missed a message *before* you apply anything, and you resync from a REST snapshot. Kraken v2 sends no sequence numbers. Instead each message carries a CRC32 checksum of the top 10 levels as they should look after the update, so you apply it, hash your own book and compare. A mismatch tells you your state is wrong whatever the cause (a lost message, a parsing bug, a forgotten depth truncation), and the fix is to resubscribe for a fresh snapshot. The checksum catches more kinds of bug than a sequence number, but only after the fact and only for the top 10 levels. Prices and sizes are held as exact integer ticks and lots, which is also what makes the checksum string trivial to build, and the implementation is pinned to the worked example in Kraken's own documentation (checksum 3310070434).
+
+`research.py` then runs an order-flow forecast on a capture: OFI over a window, top-of-book imbalance and spread at time t, predicting the sign of the mid move over the next h events, with purged walk-forward folds, an overlap-adjusted IC t-stat, baselines, costs and negative controls. One finding worth knowing: the older microprice-label pipeline scores AUC around 0.65 on pure noise, because queue sizes mean-revert, so use the mid-based evaluation for any real claim.
 
 ## Order entry, FIX and the OMS
 
@@ -215,5 +223,7 @@ test_capture_live.py  live capture against a local fake Binance feed
 rust/          the compiled port: same semantics, 12.7x throughput
 rust/src/spsc.rs  lock-free SPSC queue for the feed -> matcher handoff
 rust/src/py.rs    PyO3 binding (built only with the `python` feature)
+cpp/              C++17 port: header-only engine, replay/bench/selftest, Makefile, MSVC-compatible
+bench_sim.py      end-to-end simulation timing, Python vs Rust; --profile measures the book's true share
 rust/bench/       criterion benchmarks, a separate crate so the engine stays dependency-free
 ```

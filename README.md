@@ -4,11 +4,11 @@
 
 Two halves. A limit order book exchange built from scratch, and a research platform that uses it.
 
-**The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to Rust. The two are differential-tested: fed identical order streams, they produce byte-identical event logs, and the Rust version runs **12.7x faster (3.4M orders/sec) with 13x lower p99.9 latency**.
+**The engine** ([`engine/`](engine/)) is a matching engine with correct price-time priority, written in Python and then ported to **Rust and C++17**. All three are differential-tested: fed identical order streams, they produce byte-identical event logs. The Rust version runs **12.7x faster than Python (3.4M orders/sec) with 13x lower p99.9 latency**; the C++ port is clean under AddressSanitizer and UBSan and builds with both g++ and MSVC in CI.
 
 Around it sits the rest of a trading stack: **FIX 4.4 over TCP** with a real session layer (heartbeats, sequence-gap recovery, resend and gap fill) feeding an OMS with cancel/replace and average-cost PnL, **pre-trade risk** (price collars, position limits, self-trade prevention), **instrument reference data** with Reg NMS tick regimes and multi-symbol routing, a **lock-free SPSC queue** for the feed-to-matcher handoff, **live Binance L2 capture** with sequence-gap detection and resync, **execution algorithms** (TWAP, VWAP, POV) scored by implementation shortfall, an **Avellaneda-Stoikov market maker**, and **latency histograms** exposed as Prometheus text.
 
-The Rust engine isn't only a benchmark: it's exposed to Python through **PyO3**, and the app's simulator runs on it whenever the extension is built. End to end, a 2,000-step market simulation runs **1.65x to 2.2x faster** on the Rust book (best 0.099s vs 0.060s; identical 2,416 trades). That's far below the engine's 12.7x, and profiling says why: matching is only 47% of the simulation's time, so by Amdahl's law even an infinitely fast engine caps the gain at about 1.9x. The rest is the agents' Python decision logic (`python -m engine.bench_sim`). **CI** builds it on every push, proves it matches the Python engine event for event, and then reruns the whole backend test suite on top of it.
+The Rust engine isn't only a benchmark: it's exposed to Python through **PyO3**, and the app's simulator runs on it whenever the extension is built. End to end, a 2,000-step market simulation runs **1.65x to 2.2x faster** on the Rust book (best 0.099s vs 0.060s; identical 2,416 trades). That's far below the engine's 12.7x, and measuring says why. `python -m engine.bench_sim --profile` records every call the simulation makes on the book, replays them in a bare loop, and separately times the Python side against a no-work stand-in: the book is about 48% of a run, so by Amdahl's law even an infinitely fast engine caps the gain near 1.9x. Orders and cancels now cross into Rust in batches, which trims per-call overhead, but raising the ceiling means moving the agents' decision logic out of Python. **CI** builds it on every push, proves it matches the Python engine event for event, and then reruns the whole backend test suite on top of it.
 
 **The platform** is a paper-trading arena and research workbench: write trading rules in plain English or a small safe DSL, race strategies against each other, and stress-test them with a parameter optimizer, walk-forward validation, Monte Carlo, and a market-regime detector. Backtests can fill against a modelled **order book** instead of the closing price, multi-asset **portfolios** get proper risk numbers (VaR, CVaR, beta, factor exposure), and a **stylized-facts** check asks whether the simulated market behaves like a real one.
 
@@ -28,7 +28,11 @@ python test.py          # every self-check
 python bench.py         # throughput and tail latency, 5 repeats with spread
 cd rust
 cargo test              # the Rust port
+cd ../cpp
+make test               # the C++ port (or see engine/cpp/README.md for MSVC)
 ```
+
+To record real order-book data: `python capture.py --live kraken BTC/USD 3600` from `engine/`, then `python research.py "data\kraken_BTCUSD_*.jsonl.gz"` to run the order-flow forecast on it.
 
 To run the app on the Rust engine, build the Python extension once: inside `engine/rust`, run `python -m pip install .` (pip fetches maturin and compiles the Rust for you). Without it everything still works on the Python engine.
 
@@ -135,8 +139,9 @@ Weights are decided with data up to day T and held from T+1, rebalanced monthly 
 
 - **Simulated market.** Agents (market makers, momentum and mean-reversion traders, noise traders) post orders into the matching engine and trade with each other. Closed-economy invariants are checked every step: shares and cash are conserved, the book never crosses.
 - **Execution and TCA.** Work a parent order with TWAP, VWAP, or POV against that live book and score it by implementation shortfall.
-- **Market making.** An Avellaneda-Stoikov maker, which skews its quotes against its inventory, runs head to head with a naive symmetric one on the same market. Profit splits exactly into spread capture and inventory PnL. In this calm market A-S holds about 6.7x less inventory but makes less money: reducing risk has a price, and here the risk was cheap.
-- **Stylized facts.** Real returns and the simulator's returns are tested against five well-documented properties of markets: heavy tails, no linear autocorrelation, volatility clustering, aggregational Gaussianity, and the leverage effect. The simulator honestly fails two of them (its returns are autocorrelated, and it has no leverage effect), which is the point of testing it.
+- **Market making.** An Avellaneda-Stoikov maker, which skews its quotes against its inventory, runs head to head with a naive symmetric one on the same market. Profit splits exactly into spread capture and inventory PnL. A-S holds about 3x less inventory and runs near break-even, while the naive maker earns more by carrying more risk: reducing risk has a price.
+- **Stylized facts.** Real returns and the simulator's returns are tested against five well-documented properties of markets: heavy tails, no linear autocorrelation, volatility clustering, aggregational Gaussianity, and the leverage effect. The simulator used to fail the autocorrelation test badly (lag-1 correlation of +0.35). Ablations traced it to market makers anchoring their quotes to their own previous quotes, which turned every inventory adjustment into a trend; after fixing that at the root, it passes on 87% of held-out seeds. It still has no leverage effect, and says so.
+- **Order-flow forecast.** A short-horizon forecast of the mid price from order-flow imbalance, book imbalance, the microprice and recent trade flow, refitted walk-forward with a purge gap and scored only out of sample, next to a negative control fed an unrelated market's features. It has real skill (information coefficient around 0.2 a few steps ahead, control near zero). A market maker that leans its quotes on the forecast is compared with plain A-S on the same market using markouts, the standard measure of adverse selection; so far the lean doesn't reliably pay, and the card reports that as it is.
 - **Research agent.** Searches strategy variants and then discounts its own best result with the Deflated Sharpe Ratio, because search enough variations and one will look brilliant by luck.
 
 ## engine/: the matching engine underneath
@@ -144,7 +149,7 @@ Weights are decided with data up to day T and held from T+1, rebalanced monthly 
 Everything above treats prices as something that already happened. `engine/` is the other half: a limit order book exchange built from scratch, where prices are produced rather than downloaded.
 
 - **Matching engine** with real price-time priority, integer tick prices, partial fills, and lazy cancellation. 269,000 orders/sec single-threaded in pure Python, with a p99 of 12.6 microseconds.
-- **Live capture** of Binance L2 depth and trades over the public websocket, including the snapshot/diff handshake and sequence-gap detection that keep a local book honest.
+- **Live capture** of L2 depth and trades from **Kraken** and Binance. The two keep a local book honest in opposite ways: Binance numbers every update, so you detect a *missed message* before applying anything; Kraken sends a CRC32 checksum of the top 10 levels, so you detect a *wrong book* after applying each update and resubscribe. The Kraken checksum is pinned to Kraken's own published test vector. (Kraken is the default because Binance is unavailable from Canada and the US.)
 - **Replay with queue position**, so a backtest asks "would my order actually have filled, given the 400 shares queued ahead of it" instead of assuming a fill at mid.
 - **Purged walk-forward research**, which drops training rows whose labels overlap the test window. Ordinary k-fold leaks here and inflates every metric.
 - **FIX 4.4 session layer** over TCP: logon, heartbeats and test requests, sequence-gap detection with resend requests, gap fills for admin messages, possible-duplicate replays, and checksum-validated framing. Order messages go to the OMS and execution reports come back. It's hardened against hostile clients: no cross-client cancels, no session hijacking, bounded resends and queues.
@@ -164,6 +169,7 @@ See `engine/README.md` for the benchmark methodology and the before/after number
 
 - every engine self-check and 460+ endpoint checks, on deterministic synthetic data so a slow Yahoo can't fail the build;
 - `cargo test` and the Python-vs-Rust differential test on 20,000 orders, on both Linux and Windows;
+- the C++ port built with g++ under `-Werror` and with MSVC, its selftest, a 200,000-op replay under AddressSanitizer and UBSan, and the Python-vs-C++ differential test;
 - a build of the PyO3 extension, a 20,000-op comparison through it (which fails, rather than skips, if the extension is missing), and the entire backend suite rerun with the Rust book underneath;
 - on main, benchmarks for both engines and criterion, uploaded as artifacts rather than asserted, because shared runners make timing thresholds flaky.
 
@@ -200,11 +206,12 @@ A signal computed from today's close can only be traded tomorrow. The engine shi
 | `backend/portfolio.py` | Multi-asset backtests with sizing schemes, VaR/CVaR, beta, factor exposure, risk contributions |
 | `backend/market_sim.py` | The agent-based market, including the Avellaneda-Stoikov maker and its PnL decomposition |
 | `backend/stylized.py` | Stylized-facts tests for real and simulated returns |
+| `backend/forecast.py` | Order-flow forecast (walk-forward, purge gap, negative control) and the forecast-skewed market maker with markouts |
 | `backend/exec_sim.py` | Works parent orders through the simulated market and scores them |
 | `frontend/index.html` | The web UI: Arena, Lab, Analysis, Regime, Compare, Portfolio, and Engine tabs, built with Chart.js and vanilla JS |
 | `backend/ai.py` | Turns a plain-English strategy description into validated rules, using your own API key or a local model |
 | `backend/test_bullpen.py` | Plain-Python test suite, run with `python backend/test_bullpen.py` |
-| `engine/` | The matching engine (Python and Rust), FIX session layer, OMS, risk, execution algos, live capture, queue-position replay, and research pipeline |
+| `engine/` | The matching engine (Python, Rust, C++), FIX session layer, OMS, risk, execution algos, Kraken and Binance capture, queue-position replay, and research pipeline |
 | `.github/workflows/ci.yml` | CI: Python checks, Rust tests and the differential test on Linux and Windows, the PyO3 build, benchmarks |
 
 ## Roadmap
@@ -222,5 +229,9 @@ A signal computed from today's close can only be traded tomorrow. The engine shi
 11. ~~Avellaneda-Stoikov market maker and stylized-facts validation of the simulator~~ (done)
 12. ~~Portfolio layer: sizing, VaR/CVaR, factor exposure~~ (done)
 13. ~~FIX session layer over TCP and repeatable benchmarks~~ (done)
-14. Replay recorded Binance order books through the engine, and compare their stylized facts with the simulator's
-15. Fix the simulator's autocorrelated returns, the main fact it fails
+14. ~~C++ port, differential-tested and sanitizer-clean~~ (done)
+15. ~~Fix the simulator's autocorrelated returns at the root~~ (done)
+16. ~~Order-flow forecast and a forecast-skewed market maker, scored with markouts~~ (done)
+17. ~~Kraken capture with checksum verification~~ (done)
+18. Record real Kraken books and run the forecast and stylized facts on them
+19. Move the simulator's agents out of Python: the book is only ~48% of a run, so a faster book alone caps the end-to-end gain near 1.9x

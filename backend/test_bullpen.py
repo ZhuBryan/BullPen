@@ -1045,9 +1045,9 @@ check(book["fill_model"] == "book", "fill_model=book routes to the order-book ba
 check(set(close["metrics"]) <= set(book["metrics"]), "book result has every close-fill metric")
 check(len(book["equity"]) == len(close["equity"]), "book and close equity curves aligned")
 cmp_ = book["comparison"]
-check(abs(cmp_["timing_effect_pct_points"] + cmp_["cost_effect_pct_points"]
-          + cmp_["capacity_effect_pct_points"] - cmp_["return_gap_pct_points"]) <= 0.011,
-      "book-vs-close gap = timing + cost + capacity")
+check(abs(sum(cmp_[f"{k}_effect_pct_points"] for k in ("timing", "rounding", "cost", "capacity"))
+          - cmp_["return_gap_pct_points"]) <= 0.021,
+      "book-vs-close gap = timing + rounding + cost + capacity")
 check(cmp_["close_fill_return_pct"] == close["metrics"]["total_return_pct"],
       "comparison's close-fill return matches the close-fill endpoint")
 check("annual_returns" in book, "book result still gets annual/monthly breakdowns")
@@ -1058,12 +1058,6 @@ for bad in ("teleport", "BOOK"):
         check(False, f"fill_model={bad!r} should 400")
     except HTTPException as e:
         check(e.status_code == 400, f"fill_model={bad!r} -> 400")
-try:
-    backtest(BacktestRequest(ticker="BOOKTEST", start="2021-01-01", end="2023-01-01",
-                             fill_model="book", spread_model="guess"))
-    check(False, "unknown spread_model should 400")
-except HTTPException as e:
-    check(e.status_code == 400, "unknown spread_model -> 400")
 
 # Strategy parameters are bounded by their declared min/max (one shared parser)
 for params, label in (({"fast": 1e9}, "fast=1e9"), ({"fast": "abc"}, "fast='abc'")):

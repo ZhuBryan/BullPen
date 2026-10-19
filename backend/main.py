@@ -75,7 +75,6 @@ class BacktestRequest(BaseModel):
     # idealized). "book": send a market order at the next open into a modelled
     # order book, so size moves the price (see book_backtest.py).
     fill_model: str = "close"
-    spread_model: str = "range"
 
 
 class RegimeRequest(BaseModel):
@@ -349,8 +348,7 @@ def _run_strategy(req):
         from backend.book_backtest import run as book_run
         try:
             with APP_METRICS.timer("backtest.book"):
-                result = book_run(prices, positions, starting_cash=req.starting_cash,
-                                  spread_model=getattr(req, "spread_model", "range"))
+                result = book_run(prices, positions, starting_cash=req.starting_cash)
         except ValueError as e:
             raise HTTPException(400, str(e))
     else:

@@ -1421,6 +1421,8 @@ const HELP = {
   'Timing':        'Part of the gap from trading at the next open instead of the signal day’s close. It can help or hurt.',
   'Cost':          'Part of the gap from paying the spread and moving the price. Almost always negative.',
   'Capacity':      'Part of the gap from shares the book could not fill, so the position ended up a different size than planned.',
+  'Rounding':      'Part of the gap from buying whole shares instead of fractions. Big when the position is only a few shares of a pricey stock.',
+  'Other':         'What remains when every order filled: share rounding interacting with costs (paying the spread can leave you one share short). Read it together with Rounding.',
   'Date':          'Day the order was sent.',
   'Side':          'B is a buy, S is a sell.',
   'Ordered':       'Shares the strategy asked for.',
@@ -2366,11 +2368,13 @@ function renderBookExecution(r) {
     makeMCard('Book fills', fPct(c.book_fill_return_pct), sgnCls(c.book_fill_return_pct)),
     makeMCard('Return gap', fNum(c.return_gap_pct_points, 2, true) + ' pts', sgnCls(c.return_gap_pct_points)),
     makeMCard('Timing', fNum(c.timing_effect_pct_points, 2, true) + ' pts', sgnCls(c.timing_effect_pct_points)),
+    makeMCard('Rounding', fNum(c.rounding_effect_pct_points, 2, true) + ' pts', sgnCls(c.rounding_effect_pct_points)),
     makeMCard('Cost', fNum(c.cost_effect_pct_points, 2, true) + ' pts', sgnCls(c.cost_effect_pct_points)),
-    makeMCard('Capacity', fNum(c.capacity_effect_pct_points, 2, true) + ' pts', sgnCls(c.capacity_effect_pct_points)),
+    makeMCard(c.capacity_label === 'other' ? 'Other' : 'Capacity',
+              fNum(c.capacity_effect_pct_points, 2, true) + ' pts', sgnCls(c.capacity_effect_pct_points)),
   ].join('');
   document.getElementById('bookNote').textContent = c.note || '';
-  const worst = [...(r.tca_trades || [])].sort((a, b) => b.slippage_bps - a.slippage_bps).slice(0, 10);
+  const worst = r.tca.worst_trades || [];
   document.getElementById('bookWorst').innerHTML =
     '<thead><tr><th>Date</th><th>Side</th><th class="ta-r">Ordered</th><th class="ta-r">Filled</th>' +
     '<th class="ta-r">Arrival</th><th class="ta-r">Exec VWAP</th><th class="ta-r">Slippage (bps)</th></tr></thead><tbody>' +

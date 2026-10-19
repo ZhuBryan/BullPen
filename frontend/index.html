@@ -1053,6 +1053,27 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
         <p id="mmErr" class="error"></p>
       </div>
       <div class="card">
+        <p class="label">Order-flow forecast</p>
+        <div class="field mb-3"><label for="fcHorizon">Horizon (steps ahead)</label>
+          <select id="fcHorizon">
+            <option value="1">1 step</option>
+            <option value="5" selected>5 steps</option>
+            <option value="10">10 steps</option>
+          </select></div>
+        <div class="field mb-3"><label for="fcKappa">Kappa (forecast lean)</label>
+          <input id="fcKappa" type="number" value="1" min="-10" max="10" step="0.25">
+          <p class="hint" data-help-text="Kappa"></p></div>
+        <div class="field mb-3"><label for="fcGamma">Gamma (risk aversion)</label>
+          <input id="fcGamma" type="number" value="0.1" min="0.001" max="10" step="0.05">
+          <p class="hint" data-help-text="Gamma"></p></div>
+        <div class="field mb-3"><label for="fcSteps">Steps</label>
+          <input id="fcSteps" type="number" value="2000" min="500" max="5000"></div>
+        <div class="field mb-3"><label for="fcSeed">Seed</label>
+          <input id="fcSeed" type="number" value="7"></div>
+        <button id="fcBtn" class="w-full" onclick="runForecast()">Run forecast</button>
+        <p id="fcErr" class="error"></p>
+      </div>
+      <div class="card">
         <p class="label">Stylized facts</p>
         <div class="field mb-3"><label for="sfTicker">Ticker</label><input id="sfTicker" value="SPY"></div>
         <div class="field mb-3"><label for="sfStart">Start</label><input id="sfStart" type="date" value="2015-01-01"></div>
@@ -1150,6 +1171,33 @@ textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
       <div class="chart-box chart-sm"><canvas id="mmInvChart"></canvas></div>
       <p class="label mt-4">A-S cumulative PnL decomposition ($)</p>
       <div class="chart-box chart-sm"><canvas id="mmPnlChart"></canvas></div>
+    </div>
+
+    <div class="card" id="fcCard" style="display:none">
+      <h2>Order-flow forecast · does knowing the flow help a maker?</h2>
+      <p class="sub mb-4">
+        The forecast predicts how far the mid price will move over the next few steps from
+        order flow: who has been buying versus selling, and how lopsided the book is. It is
+        refitted as the market runs and scored only on data it never trained on. As a check,
+        a negative control feeds the same model features from an unrelated market; it should
+        show nothing. Then a maker that tilts its quotes toward the forecast is compared with
+        plain A-S and a naive maker on the identical market.
+      </p>
+      <p class="label">Forecast quality · out of sample</p>
+      <div class="table-scroll"><table class="lb-table" id="fcQualTable"></table></div>
+      <p class="label mt-4">Makers on the same market</p>
+      <div class="table-scroll"><table class="lb-table" id="fcMakerTable"></table></div>
+      <p class="sub text-sm mt-2">Markouts are in ticks per share, measured 1, 5 and 20 steps
+        after each fill. Positive is good for the maker.</p>
+      <p class="sub text-sm mt-2" id="fcRead"></p>
+      <p class="label mt-4" id="fcScatterLabel">Forecast vs realized mid change (ticks)</p>
+      <div class="chart-box chart-md"><canvas id="fcScatterChart"></canvas></div>
+      <p class="label mt-4">Cumulative PnL ($)</p>
+      <div class="chart-box chart-sm"><canvas id="fcPnlChart"></canvas></div>
+      <p class="label mt-4">Inventory (shares)</p>
+      <div class="chart-box chart-sm"><canvas id="fcInvChart"></canvas></div>
+      <p class="label mt-4">Markout curve (ticks per share)</p>
+      <div class="chart-box chart-sm"><canvas id="fcMarkoutChart"></canvas></div>
     </div>
 
     <div class="card" id="sfCard" style="display:none">
@@ -1442,6 +1490,21 @@ const HELP = {
   'Fills':          'Number of the maker’s quotes that traded.',
   'PnL per fill':   'Total PnL divided by the number of fills.',
   'Time at limit':  'Share of time the position sat at the inventory cap, where the maker stops quoting one side.',
+  // Order-flow forecast
+  'Horizon':          'How many steps ahead the forecast predicts the mid price change.',
+  '1':                'Predict the mid change over the very next step: the strongest order-flow signal, but the smallest move.',
+  '5':                'Predict the mid change over the next 5 steps: a balance between signal strength and size of move.',
+  '10':               'Predict the mid change over the next 10 steps: bigger moves, but the order flow that predicts them has mostly faded.',
+  'Kappa':            'How hard the maker leans on the forecast: its quote center moves by kappa times the predicted change. 0 is plain A-S; negative leans the wrong way.',
+  'Model':            'The forecast fitted on this market’s own order flow, scored only on steps it never trained on.',
+  'IC':               'Information coefficient: rank correlation between the forecast and what actually happened. 0 is no skill; a few hundredths is already useful at short horizons.',
+  'IC t-stat':        'How many standard errors the IC is from zero, counting overlapping horizons as one observation. Above about 2 is unlikely to be luck.',
+  'Hit rate':         'Share of steps where the forecast got the direction right, counting only steps where the price moved. 50% is a coin flip.',
+  'Negative control': 'The same model fed order flow from an unrelated market. It cannot have real skill, so its IC should sit near zero; if not, the test is leaking.',
+  'Forecast':         'Forecast maker: A-S with its quote center shifted toward the order-flow forecast, by kappa times the predicted move.',
+  'Markout +1':       'Average profit per share on the maker’s fills, marked to the mid 1 step later, in ticks. Positive is good for the maker.',
+  'Markout +5':       'Average profit per share on the maker’s fills, marked to the mid 5 steps later, in ticks. Falling from +1 means informed traders picked it off.',
+  'Markout +20':      'Average profit per share on the maker’s fills, marked to the mid 20 steps later, in ticks. The longer view of whether its fills were good trades.',
   // Stylized facts
   'Fact':                      'A statistical pattern found in nearly every real market’s returns.',
   'Real':                      'Measured on daily returns downloaded for the ticker.',
@@ -1471,7 +1534,8 @@ const HELP = {
   'Value':          'Tilt toward cheap value stocks over growth stocks (IWD minus IWF).',
   'Momentum':       'Tilt toward recent winners (MTUM minus SPY).',
   'Alpha (annual)': 'Return left over after the factor exposures are accounted for, per year. Often luck, rarely skill.',
-  'R²':        'Share of the portfolio’s daily swings explained by the factors, from 0 to 1.',
+  // Shared by the portfolio factor table and the forecast table.
+  'R²':        'Share of the variation the model explains. 1 is perfect, 0 is no better than its baseline guess, and below 0 (possible out of sample) is worse than that.',
   'Lookback':       'How many past trading days of data are used to estimate volatility and correlation when setting weights.',
   // Dropdown options: weighting and rebalance
   'equal':       'Splits money equally across the assets. Naive, but famously hard to beat.',
@@ -1492,7 +1556,7 @@ for (const [k, name] of Object.entries({TRENDING: 'Trending', MEAN_REVERTING: 'M
 // to the description the server sends with each strategy.
 const HINTED_SELECTS = ['regAttribStrategy', 'regBtStrategy', 'cmpStrategy',
   'optObjective', 'wfObjective', 'regBtFilter', 'exAlgo',
-  'fillModel', 'pfWeighting', 'pfRebalance', 'pfStrategy'];
+  'fillModel', 'pfWeighting', 'pfRebalance', 'pfStrategy', 'fcHorizon'];
 
 function helpFor(key) {
   if (HELP[key]) return HELP[key];
@@ -3438,6 +3502,89 @@ function runMaker() {
       lineDs('Inventory PnL', p.inventory_pnl, TOKENS.amber),
       lineDs('Total', p.total_pnl, TOKENS.text, {borderWidth: 2}),
     ]}, options: withLegend()});
+  });
+}
+
+/* ---- Order-flow forecast: forecast quality, then three makers on one market ----
+   Finance in one line: a maker loses money to traders who know where the price
+   is going next (adverse selection). If order flow predicts the next few steps,
+   a maker that leans its quotes toward that prediction should get picked off
+   less, which shows up as better markouts. */
+const FC_MAKERS = [['naive', 'Naive', PALETTE[5]], ['avellaneda_stoikov', 'A-S', TOKENS.accent],
+  ['forecast_maker', 'Forecast', PALETTE[4]]];
+const FC_LAGS = ['1', '5', '20'];
+function runForecast() {
+  return withButton('fcBtn', 'fcErr', 'Running…', async () => {
+    const num = id => Number(document.getElementById(id).value);
+    const d = await postJson('/api/sim/forecast', {horizon: num('fcHorizon'), kappa: num('fcKappa'),
+      gamma: num('fcGamma'), steps: num('fcSteps'), seed: num('fcSeed')}, 'Forecast run failed');
+    showEngineCard('fcCard');
+    const H = d.forecast.by_horizon, h = String(d.params.horizon);
+
+    // Forecast quality: model on the left, the negative control beside it.
+    const t = (v, dp, signed) => '<td class="ta-r num">' + fNum(v, dp, signed) + '</td>';
+    document.getElementById('fcQualTable').innerHTML =
+      '<thead><tr><th></th><th colspan="4" style="text-align:center">Model</th>' +
+      '<th colspan="2" style="text-align:center">Negative control</th></tr>' +
+      '<tr><th>Horizon</th><th class="ta-r">R²</th><th class="ta-r">IC</th><th class="ta-r">IC t-stat</th>' +
+      '<th class="ta-r">Hit rate</th><th class="ta-r">IC</th><th class="ta-r">IC t-stat</th></tr></thead><tbody>' +
+      Object.keys(H).sort((a, b) => a - b).map(k => {
+        const m = H[k].model, c = H[k].negative_control;
+        return '<tr' + (k === h ? ' style="font-weight:600"' : '') + '><th>' + k + (k === '1' ? ' step' : ' steps') + '</th>' +
+          t(m.r2, 3, true) + t(m.ic, 3, true) + t(m.ic_t, 2, true) +
+          '<td class="ta-r num">' + (m.hit_rate == null ? fNum(null) : fNum(m.hit_rate * 100, 1) + '%') + '</td>' +
+          t(c.ic, 3, true) + t(c.ic_t, 2, true) + '</tr>';
+      }).join('') + '</tbody>';
+
+    // Makers side by side. Markouts: positive = the fill was a good trade for the maker.
+    const S = d.makers;
+    const rows = [
+      ['Total PnL', s => s.total_pnl, fMoney, sgnCls],
+      ['Spread capture', s => s.spread_capture, fMoney, sgnCls],
+      ['Inventory PnL', s => s.inventory_pnl, fMoney, sgnCls],
+      ['Inventory std', s => s.inventory_std, v => fNum(v, 2), () => ''],
+      ['Fills', s => s.fills, v => fNum(v, 0), () => ''],
+      ['PnL per fill', s => s.pnl_per_fill, v => fNum(v, 4, true), sgnCls],
+      ...FC_LAGS.map(l => ['Markout +' + l, s => s.markout_ticks[l], v => fNum(v, 2, true), sgnCls]),
+    ];
+    document.getElementById('fcMakerTable').innerHTML =
+      '<thead><tr><th></th>' + FC_MAKERS.map(([, name]) => '<th class="ta-r">' + name + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      rows.map(([name, get, f, c]) => '<tr><th>' + name + '</th>' + FC_MAKERS.map(([key]) => {
+        const v = get(S[key]);
+        return '<td class="ta-r num ' + c(v) + '">' + f(v) + '</td>';
+      }).join('') + '</tr>').join('') + '</tbody>';
+
+    // Readout: numbers only.
+    const q = H[h] || {}, m = q.model || {}, c = q.negative_control || {};
+    const live = d.forecast.live_in_forecast_maker_run || {};
+    const fm = S.forecast_maker.total_pnl, as = S.avellaneda_stoikov.total_pnl;
+    document.getElementById('fcRead').textContent = 'Forecast IC at h=' + h + ': ' + fNum(m.ic, 3) +
+      ' (t ' + fNum(m.ic_t, 2) + ') vs control ' + fNum(c.ic, 3) + ' (t ' + fNum(c.ic_t, 2) + '). ' +
+      'Inside the forecast maker’s own market: IC ' + fNum(live.ic, 3) + ' (t ' + fNum(live.ic_t, 2) + '). ' +
+      'Total PnL: forecast maker ' + fMoney(fm) + ', A-S ' + fMoney(as) + ', naive ' +
+      fMoney(S.naive.total_pnl) + '. Forecast maker minus A-S: ' + (fm - as > 0 ? '+' : '') + fMoney(fm - as) + '.';
+
+    const p = d.paths, x = p.step;
+    // (a) Scatter: each dot is one forecast and the change that followed. A
+    // cloud tilted up and to the right is skill; a flat round blob is none.
+    document.getElementById('fcScatterLabel').textContent =
+      'Forecast vs realized mid change over the next ' + h + (h === '1' ? ' step' : ' steps') + ' (ticks, A-S run)';
+    const pts = p.forecast_ticks.map((f, i) => ({x: f, y: p.realized_ticks[i]}))
+      .filter(pt => pt.x != null && pt.y != null);
+    drawChart('fcScatterChart', {type: 'scatter', data: {datasets: [
+      {label: 'Forecast vs realized', data: pts, backgroundColor: rgba(TOKENS.accent, 0.45),
+       borderWidth: 0, pointRadius: 2},
+    ]}, options: chartOpts({animation: false, interaction: {mode: 'nearest', intersect: true},
+      scales: {x: {type: 'linear', title: {display: true, text: 'Forecast (ticks)', color: TOKENS.muted, font: {size: 10}}},
+               y: {title: {display: true, text: 'Realized (ticks)', color: TOKENS.muted, font: {size: 10}}}}})});
+    const byMaker = series => FC_MAKERS.map(([key, name, col]) => lineDs(name, series[key], col));
+    drawChart('fcPnlChart', {type: 'line', data: {labels: x, datasets: byMaker(p.pnl)}, options: withLegend()});
+    drawChart('fcInvChart', {type: 'line', data: {labels: x, datasets: byMaker(p.inventory)}, options: withLegend()});
+    drawChart('fcMarkoutChart', {type: 'line', data: {labels: FC_LAGS.map(l => '+' + l),
+      datasets: FC_MAKERS.map(([key, name, col]) =>
+        lineDs(name, FC_LAGS.map(l => S[key].markout_ticks[l]), col, {pointRadius: 3}))},
+      options: withLegend()});
   });
 }
 

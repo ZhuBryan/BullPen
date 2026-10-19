@@ -74,6 +74,22 @@ def acf(x, max_lag=MAX_LAG):
     return [float((d[:-k] * d[k:]).sum() / var) for k in range(1, max_lag + 1)]
 
 
+def robust_band(x, max_lag=MAX_LAG, z=1.96):
+    """95% band for the ACF of an UNCORRELATED but heteroskedastic series.
+
+    The textbook +/-1.96/sqrt(n) band assumes i.i.d. returns. Real returns
+    are uncorrelated but cluster in volatility, which widens the sampling
+    error of the ACF; with the i.i.d. band a truly uncorrelated GARCH series
+    "fails" about 4 times in 10. This per-lag standard error,
+    se_k = sqrt(sum d_t^2 d_{t-k}^2) / sum d_t^2 (Taylor, 1986), stays valid
+    under volatility clustering, so the test asks the question it means to.
+    """
+    d = np.asarray(x, float) - np.mean(x)
+    var = (d ** 2).sum()
+    return [float(z * math.sqrt((d[:-k] ** 2 * d[k:] ** 2).sum()) / var)
+            for k in range(1, max_lag + 1)]
+
+
 def hill(x, frac=0.05):
     """Hill estimator of the tail index alpha on |returns|.
 
@@ -106,14 +122,22 @@ def facts(returns, max_lag=MAX_LAG):
     k_se = math.sqrt(24 / n)
     alpha = hill(r)
 
-    # 2. Linear ACF. Lag 1 is reported but excused: bid-ask bounce and
-    # stale prices legitimately create a small lag-1 effect in real data.
-    # Under the null ~5% of lags poke out of the band by chance, so allow 2/19.
-    # Caveat: the +/-1.96/sqrt(n) band assumes i.i.d. returns. With volatility
-    # clustering the true sampling error of the ACF is wider, so real data can
-    # "fail" this test a little more often than the band suggests.
+    # 2. Linear ACF. A NEGATIVE lag 1 is excused: bid-ask bounce makes the
+    # next return tend to reverse, which is microstructure, not
+    # predictability. A positive lag 1 is not excused (an earlier version
+    # excused lag 1 entirely and so missed half of all AR(1) series, whose
+    # signal sits mostly at lag 1). Under the null ~5% of lags poke out of
+    # the band by chance, so allow 2; but any lag beyond TWICE its band is
+    # too strong to be chance and fails on its own.
+    # The band is the heteroskedasticity-robust one (see robust_band): the
+    # i.i.d. band would reject real, uncorrelated, volatility-clustered
+    # returns far too often. Fact 3 below keeps the i.i.d. band, because
+    # there "independent" is exactly the null being tested.
     ac = acf(r, max_lag)
-    outside = sum(abs(v) > band for v in ac[1:])
+    rband = robust_band(r, max_lag)
+    checked = [(v, b) for i, (v, b) in enumerate(zip(ac, rband)) if i > 0 or v > 0]
+    outside = sum(abs(v) > b for v, b in checked)
+    strong = any(abs(v) > 2 * b for v, b in checked)
 
     # 3. Volatility clustering: ACF of |r| above the band at most lags.
     ac_abs = acf(np.abs(r), max_lag)
@@ -140,13 +164,15 @@ def facts(returns, max_lag=MAX_LAG):
         "skew": _skew(r),
         "zero_fraction": float(np.mean(r == 0)),
         "band": band,
+        "band_robust": rband,
         "acf": ac,
         "acf_abs": ac_abs,
         "leverage_corr": leverage,
         "heavy_tails": {"pass": bool(heavy), "excess_kurtosis": k,
                         "threshold": 3 * k_se, "hill_alpha": alpha},
-        "no_autocorrelation": {"pass": bool(outside <= 2), "lag1": ac[0],
-                               "lags_outside_band_2_to_20": int(outside)},
+        "no_autocorrelation": {"pass": bool(outside <= 2 and not strong), "lag1": ac[0],
+                               "lags_outside_band": int(outside),
+                               "any_lag_beyond_2x_band": bool(strong)},
         "volatility_clustering": {"pass": bool(above >= max_lag // 2),
                                   "lags_above_band": int(above),
                                   "abs_acf_lag1": ac_abs[0],
@@ -234,12 +260,14 @@ def compare(ticker="SPY", start="2015-01-01", end="2025-01-01", sim_steps=3000, 
         "sim_steps": int(sim_steps), "seed": seed,
         "lags": list(range(1, MAX_LAG + 1)),
         "real": {"facts": pick(real), "n": real["n"], "std": real["std"],
-                 "skew": real["skew"], "band": real["band"], "acf": real["acf"],
+                 "skew": real["skew"], "band": real["band"],
+                 "band_robust": real["band_robust"], "acf": real["acf"],
                  "acf_abs": real["acf_abs"], "leverage_corr": real["leverage_corr"],
                  "histogram": histogram(real_r)},
         "sim": {"facts": pick(simf), "n": simf["n"], "std": simf["std"],
                 "skew": simf["skew"], "zero_fraction": simf["zero_fraction"],
-                "band": simf["band"], "acf": simf["acf"], "acf_abs": simf["acf_abs"],
+                "band": simf["band"], "band_robust": simf["band_robust"],
+                "acf": simf["acf"], "acf_abs": simf["acf_abs"],
                 "leverage_corr": simf["leverage_corr"], "histogram": histogram(sim_r)},
         "findings": _findings(real, simf, source),
     }

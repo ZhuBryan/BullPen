@@ -3464,16 +3464,21 @@ function runStylized() {
           '<td class="ta-r num nowrap">' + val(s) + ' ' + mark(s) + '</td></tr>';
       }).join('') + '</tbody>';
 
-    const band = Math.max(d.real.band, d.sim.band);
-    // The +/- band is where white noise's ACF lands 95% of the time.
-    const bandDs = sign => lineDs('95% noise band', d.lags.map(() => sign * band),
+    // The +/- band is where the ACF of a series with no such structure lands
+    // 95% of the time. For |returns| that's the i.i.d. band (independence is
+    // the null). For returns it's the real series' robust per-lag band, which
+    // allows for volatility clustering, matching the pass/fail test.
+    const iid = Math.max(d.real.band, d.sim.band);
+    const bandFor = key => key === 'acf' && d.real.band_robust ? d.real.band_robust
+                                                               : d.lags.map(() => iid);
+    const bandDs = (sign, key) => lineDs('95% noise band', bandFor(key).map(v => sign * v),
       TOKENS.muted, {borderWidth: 1, borderDash: [4, 4]});
     const acfOpts = withLegend({plugins: {legend: {display: true, labels: {...LEGEND_LABELS,
       filter: it => it.datasetIndex !== 3}}}});
     const acfChart = (id, key) => drawChart(id, {type: 'line', data: {labels: d.lags, datasets: [
       lineDs('Real (' + d.data_source + ')', d.real[key], TOKENS.accent, {pointRadius: 2}),
       lineDs('Simulated', d.sim[key], TOKENS.amber, {pointRadius: 2}),
-      bandDs(1), bandDs(-1),
+      bandDs(1, key), bandDs(-1, key),
     ]}, options: acfOpts});
     acfChart('sfAbsChart', 'acf_abs');
     acfChart('sfAcfChart', 'acf');

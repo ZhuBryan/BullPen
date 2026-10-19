@@ -403,3 +403,31 @@ dict; the integrator wraps it.
 - `POST /api/stylized` -> `stylized.compare(...)`
 - `POST /api/portfolio` -> `portfolio.run(...)`
 - `GET  /api/metrics` gains `bullpen_engine_info{engine="rust|python"} 1`
+
+## 8. Phase 3: C++ port, real order-book data, order-flow forecasting, speed
+
+Same rules as section 7: each agent edits only the files it owns; the
+integrator owns `backend/main.py`, `frontend/index.html`, `engine/test.py`,
+`backend/test_bullpen.py`, `requirements*.txt`, `.github/`, and all docs, and
+does every commit. Every module keeps a `demo()` self-check that raises on
+failure. No new runtime dependencies. No lookahead anywhere: a forecast for
+time t uses only information available at t.
+
+### 8.1 Ownership, wave 1 (parallel)
+
+| Agent | Owns | Delivers |
+|---|---|---|
+| C++ | `engine/cpp/**`, `engine/diff_test.py` | C++17 port of the matching engine, std only, with `replay <opsfile>` (same encoded event lines as Rust) and `bench <opsfile>`; a Makefile; diff_test checks Python vs Rust vs C++; clean under AddressSanitizer and UBSan |
+| Data | `engine/capture.py`, `engine/replay.py`, `engine/research.py`, `engine/test_capture_live.py`, new `engine/test_kraken_live.py` | Kraken WebSocket v2 L2 + trades capture with CRC32 checksum verification and resync, writing the same record format replay already reads; research pipeline runs unchanged on Kraken captures |
+| Sim | `backend/market_sim.py`, `backend/stylized.py`, new `backend/forecast.py` | Root-cause fix for the simulator's autocorrelated returns; an order-flow forecast evaluated strictly out of sample; a forecast-skewed A-S maker compared on the same market, with markouts |
+
+### 8.2 Wave 2 (after the simulator is fixed)
+
+| Agent | Owns | Delivers |
+|---|---|---|
+| Speed | `engine/orderbook.py`, `engine/fastbook.py`, `engine/rust/**`, `engine/test_pyo3.py`, `engine/bench_sim.py`, `backend/market_sim.py` (performance only) | A batch submission method on both books (portable interface addition), profile-driven simulator speedups with bit-identical results, before/after profiles |
+
+### 8.3 Endpoints the integrator adds
+
+- `POST /api/sim/forecast` -> `forecast.run(...)`: forecast quality and the forecast maker vs A-S vs naive.
+- `/api/stylized` unchanged in shape (simulator facts should now pass).

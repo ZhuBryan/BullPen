@@ -36,6 +36,9 @@ Run `python backend/market_sim.py` for the self-check.
 import math
 import random
 import time
+from functools import partial
+from itertools import compress
+from operator import attrgetter, eq, itemgetter
 
 # Book comes from fastbook: the Rust engine when its Python extension is built,
 # otherwise the Python one. Both implement the same portable interface (SPEC
@@ -53,6 +56,12 @@ except ImportError:                        # running this file directly
 TICK = 0.01          # dollars per tick
 START_PRICE = 10_000  # $100.00 in ticks
 START_CASH = 100_000  # dollars
+_SIDES = (BUY, SELL)
+
+# C-level helpers for the per-step loops (each one replaces a Python-level
+# loop over agents or events; results are the same, in the same order).
+_POSITION, _CASH = attrgetter("position"), attrgetter("cash")
+_TAG, _IS_TRADE = itemgetter(0), partial(eq, "trade")
 
 
 class Agent:
@@ -125,7 +134,7 @@ class MarketMaker(Agent):
         """Dollar decomposition. total == spread + inventory exactly (see step)."""
         return {"spread": self.spread_ticks * TICK, "inventory": self.inv_ticks * TICK}
 
-    def fair_value(self, book, mid):
+    def fair_value(self, book, mid, top=None):
         """Where this maker thinks the price is, judged from EVERYONE ELSE's orders.
 
         ROOT CAUSE of the simulator's old trending returns (lag-1 ACF of
@@ -159,24 +168,36 @@ class MarketMaker(Agent):
         flow actually happens (Stoikov 2018: a better predictor of the future
         mid than the mid). Ablation (10 seeds, with the Momentum fix below):
         live mid passes no-autocorrelation 7/10, live microprice 9/10.
+
+        `top` is (book.depth(BUY, 1), book.depth(SELL, 1)) if the caller has
+        already fetched them (act() has: it needs the best prices too).
         """
         if book is None:
             return mid
-        b, a = book.depth(BUY, 1), book.depth(SELL, 1)
+        b, a = top if top is not None else (book.depth(BUY, 1), book.depth(SELL, 1))
         if not b or not a:
             return mid                     # one-sided: nothing better to go on
         (bp, bq), (ap, aq) = b[0], a[0]
         return math.floor((bq * ap + aq * bp) / (bq + aq) + 0.5)
 
     def act(self, book, mid, history, rnd):
-        fv = self.fair_value(book, mid)
+        if book is not None:
+            # One depth call per side gives both the microprice inputs and the
+            # best prices (depth's first level IS the best bid/ask), so the
+            # book is asked twice instead of four times. On the Rust engine
+            # each ask is a Python->Rust call with a fixed cost.
+            b, a = book.depth(BUY, 1), book.depth(SELL, 1)
+            fv = self.fair_value(book, mid, (b, a))
+        else:
+            fv = self.fair_value(book, mid)
         skew = int(self.spread * (self.position / self.max_inv)) if self.max_inv else 0
         bid = fv - self.spread - skew
         ask = fv + self.spread - skew
         # Stay passive: a skewed quote at or through someone else's quote
         # would execute at once and pay the spread instead of earning it.
         if book is not None:
-            bb, ba = book.best_bid(), book.best_ask()
+            bb = b[0][0] if b else None    # == book.best_bid()
+            ba = a[0][0] if a else None    # == book.best_ask()
             if ba is not None:
                 bid = min(bid, ba - 1)
             if bb is not None:
@@ -386,7 +407,7 @@ class Noise(Agent):
     def act(self, book, mid, history, rnd):
         if rnd.random() > self.rate:
             return []
-        side = rnd.choice([BUY, SELL])
+        side = rnd.choice(_SIDES)        # same draw as choice([BUY, SELL])
         if rnd.random() < 0.3:
             return [("market", side, None, self.size)]
         off = rnd.randint(1, self.spread)
@@ -415,62 +436,104 @@ class Simulation:
         self.history = [start]
         self.bars = []
         self._seen_events = 0
+        # Trade events among the first _seen_events, so result() needn't pull
+        # the whole event log back out of the book (on Rust: every event
+        # converted to a Python tuple) just to count them.
+        self._trades = 0
         self.last_flow = 0
         self._start_cash = sum(a.cash for a in self.agents)
 
     # ---- helpers -------------------------------------------------------
     def mid(self):
-        bb, ba = self.book.best_bid(), self.book.best_ask()
+        return self._mid_of(self.book.best_bid(), self.book.best_ask())
+
+    def _mid_of(self, bb, ba):
         if bb is not None and ba is not None:
             return (bb + ba) // 2
         return self.last
 
     def _submit(self, agent, kind, side, price, qty):
-        if kind == "market":
-            oid = self.book.market(side, qty)
-        else:
-            oid = self.book.limit(side, price, qty)
-        self.owner[oid] = (agent, side)
-        if kind == "limit":
-            agent.live.append(oid)
+        self._submit_orders(agent, [(kind, side, price, qty)])
+
+    def _submit_orders(self, agent, orders):
+        """Send one agent's orders to the book in a single call.
+
+        One submit_many call per agent, never across agents: agents act in a
+        shuffled order and each sees the book as the agents before it left
+        it, so agent B's orders must not reach the book until agent A's have.
+        Within one agent, submit_many applies the orders in list order, which
+        is exactly what separate calls did. On the Rust engine this turns a
+        market maker's two quotes into one Python->Rust crossing.
+        """
+        if type(orders) is not list:     # act() may return any iterable
+            orders = list(orders)
+        if len(orders) == 1:
+            # One order: the single call is the same one crossing, and skips
+            # building a batch around it. (Momentum, MeanReverter and Noise
+            # never send more than one.)
+            kind, side, price, qty = orders[0]
+            oid = (self.book.market(side, qty) if kind == "market"
+                   else self.book.limit(side, price, qty))
+            self.owner[oid] = (agent, side)
+            if kind == "limit":
+                agent.live.append(oid)
+            return
+        ids = self.book.submit_many(
+            [("M", side, qty) if kind == "market" else ("L", side, price, qty)
+             for kind, side, price, qty in orders])
+        owner, live = self.owner, agent.live
+        for (kind, side, _, _), oid in zip(orders, ids):
+            owner[oid] = (agent, side)
+            if kind == "limit":
+                live.append(oid)
 
     def _settle(self):
         """Attribute every new trade event to both sides."""
         prices = []
         # Signed aggressor volume this step (+ = buyers lifting offers), the
         # "trade flow" an order-flow forecast reads (backend/forecast.py).
-        self.last_flow = 0
-        for ev in self.book.events_since(self._seen_events):
-            if ev[0] != "trade":
-                continue
+        flow = 0
+        owner = self.owner
+        events = self.book.events_since(self._seen_events)
+        # Most events are accepts and cancels; pick out the trades without a
+        # Python-level test per event (same as `if ev[0] == "trade"`).
+        for ev in compress(events, map(_IS_TRADE, map(_TAG, events))):
             # Index rather than unpack: events carry trailing seq/ts fields.
             price, qty, aggressor_id, resting_id = ev[1], ev[2], ev[3], ev[4]
-            for oid in (aggressor_id, resting_id):
-                who = self.owner.get(oid)
-                if who:
-                    who[0].on_fill(who[1], price, qty)
-            agg = self.owner.get(aggressor_id)
+            agg = owner.get(aggressor_id)
             if agg:
-                self.last_flow += qty if agg[1] == BUY else -qty
+                agg[0].on_fill(agg[1], price, qty)
+            who = owner.get(resting_id)
+            if who:
+                who[0].on_fill(who[1], price, qty)
+            if agg:
+                flow += qty if agg[1] == BUY else -qty
             prices.append(price)
-        self._seen_events = self.book.event_count()
+        self.last_flow = flow
+        # events_since(n) is events[n:], so this equals book.event_count()
+        # without another call into the book.
+        self._seen_events += len(events)
+        self._trades += len(prices)
         return prices
 
-    def _check(self):
+    def _check(self, top=None):
         """Enforce the closed-economy invariants.
 
         These raise instead of assert on purpose: `python -O` strips assert
         statements, so an optimized deployment would run with every safety
         check silently removed. An invariant you only check in debug builds is
         not an invariant.
+
+        `top` is (best_bid, best_ask) if the caller already has them for the
+        book as it is now (step() does), to save two calls into the book.
         """
-        pos = sum(a.position for a in self.agents)
+        pos = sum(map(_POSITION, self.agents))
         if pos != 0:
             raise RuntimeError(f"shares created from nothing: net position {pos}")
-        cash = sum(a.cash for a in self.agents)
+        cash = sum(map(_CASH, self.agents))       # same order as ever: same float
         if abs(cash - self._start_cash) >= 1e-6:
             raise RuntimeError(f"money created: {cash:.4f} != {self._start_cash:.4f}")
-        bb, ba = self.book.best_bid(), self.book.best_ask()
+        bb, ba = top if top is not None else (self.book.best_bid(), self.book.best_ask())
         if bb is not None and ba is not None and bb >= ba:
             raise RuntimeError(f"crossed book {bb}/{ba}")
 
@@ -480,17 +543,24 @@ class Simulation:
         # Makers cancel and requote each step; otherwise stale quotes pile up
         # and the book fills with orders nobody intends to honour.
         makers = [a for a in self.agents if isinstance(a, MarketMaker)]
+        # All makers' cancels go in one batch, in the same order as before
+        # (maker by maker, oldest order first). Nobody acts in between, so
+        # batching them changes nothing but the number of book calls.
+        cancels = []
         for a in makers:
-            for oid in a.live:
-                self.book.cancel(oid)
+            cancels += [("X", oid) for oid in a.live]
             a.live.clear()
             a.mark = mid      # the mid every fill this step is measured against
+        if cancels:
+            self.book.submit_many(cancels)
 
         order = list(self.agents)
         self.rnd.shuffle(order)          # no agent gets a permanent time edge
+        book, history, rnd, submit = self.book, self.history, self.rnd, self._submit_orders
         for a in order:
-            for kind, side, price, qty in a.act(self.book, mid, self.history, self.rnd):
-                self._submit(a, kind, side, price, qty)
+            orders = a.act(book, mid, history, rnd)
+            if orders:
+                submit(a, orders)
 
         traded = self._settle()
 
@@ -509,7 +579,10 @@ class Simulation:
                 "l": min(traded) * TICK, "c": traded[-1] * TICK,
                 "v": len(traded),
             })
-        new_mid = self.mid()
+        # The book cannot change between here and the end of step(), so read
+        # its top once and share it between the new mid and _check.
+        top = self.book.best_bid(), self.book.best_ask()
+        new_mid = self._mid_of(*top)
         self.history.append(new_mid)
         # Inventory PnL: the position held after this step's fills, times the
         # mid change from this step's mark to the next step's mark. Why this
@@ -520,7 +593,7 @@ class Simulation:
         #   equity(m_end) - start_cash == spread capture + inventory PnL.
         for a in makers:
             a.inv_ticks += a.position * (new_mid - mid)
-        self._check()
+        self._check(top)
 
     def run(self, steps=500):
         for _ in range(steps):
@@ -532,7 +605,8 @@ class Simulation:
         return {
             "bars": self.bars,
             "last_price": round(self.last * TICK, 2),
-            "trades": sum(1 for e in self.book.events_since(0) if e[0] == "trade"),
+            "trades": self._trades + sum(
+                1 for e in self.book.events_since(self._seen_events) if e[0] == "trade"),
             "agents": sorted(
                 [{"name": a.name, "kind": type(a).__name__,
                   "position": a.position,

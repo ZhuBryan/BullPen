@@ -20,13 +20,17 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyFloat;
+use pyo3::types::{PyFloat, PyTuple};
 
 use crate::{Book, Event, Side};
 
 fn bad(msg: &str) -> PyErr {
     PyValueError::new_err(msg.to_string())
 }
+
+/// Same text as orderbook.py's _BAD_OP.
+const BAD_OP: &str =
+    "each op must be a tuple ('L', side, price, qty), ('M', side, qty) or ('X', order_id)";
 
 fn parse_side(side: &Bound<'_, PyAny>) -> PyResult<Side> {
     match side.extract::<String>() {
@@ -171,6 +175,49 @@ impl PyBook {
             return Vec::new();
         }
         events[n..].iter().map(|e| event_to_py(py, e)).collect()
+    }
+
+    /// Apply a list of commands in order, in ONE call from Python:
+    ///   ("L", side, price, qty) -> limit, returns the order id
+    ///   ("M", side, qty)        -> market, returns the order id
+    ///   ("X", order_id)         -> cancel, returns True/False
+    /// Each command goes through exactly the code its single method uses (the
+    /// same parsing, validation, events and errors), so a batch is
+    /// indistinguishable from the single calls made one after another. On a
+    /// bad command the error is raised at its position: the commands before
+    /// it stay applied, the ones after it are not run, as with single calls.
+    /// A malformed command (not a tuple, unknown tag, wrong length) raises
+    /// ValueError.
+    ///
+    /// Why: every call from Python into Rust pays a fixed cost to cross the
+    /// boundary and convert its arguments. A market maker that requotes two
+    /// orders, or cancels ten, pays it once instead of two or ten times.
+    fn submit_many(&mut self, py: Python<'_>, ops: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
+        let mut out: Vec<PyObject> = Vec::with_capacity(ops.len().unwrap_or(0));
+        for op in ops.iter()? {
+            let op = op?;
+            let t = op.downcast::<PyTuple>().map_err(|_| bad(BAD_OP))?;
+            let n = t.len();
+            if n == 0 {
+                return Err(bad(BAD_OP));
+            }
+            let tag: String = t.get_item(0)?.extract().map_err(|_| bad(BAD_OP))?;
+            let result: PyObject = match (tag.as_str(), n) {
+                ("L", 4) => self
+                    .limit(&t.get_item(1)?, &t.get_item(2)?, &t.get_item(3)?)?
+                    .into_py(py),
+                ("M", 3) => self.market(&t.get_item(1)?, &t.get_item(2)?)?.into_py(py),
+                // Same conversion as cancel(order_id: u64): a negative id
+                // raises OverflowError, a non-int TypeError.
+                ("X", 2) => {
+                    let id: u64 = t.get_item(1)?.extract()?;
+                    self.cancel(id).into_py(py)
+                }
+                _ => return Err(bad(BAD_OP)),
+            };
+            out.push(result);
+        }
+        Ok(out)
     }
 
     /// True while the order is resting and live. Any id that cannot be one of

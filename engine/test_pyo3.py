@@ -15,6 +15,15 @@ events_since(), which is also how real callers consume the log, and compared
 tuple for tuple except the timestamp (ts is process-local; seq is not and is
 compared). Book state is compared at checkpoints.
 
+A second pass (run_batched) drives another 20,000-op stream through
+submit_many in random-sized chunks, on both engines, against a Python book
+fed the same ops one call at a time: results, result types, events and state
+must all match, and a bad op inside a batch must raise the same ValueError,
+with the ops before it applied and the ops after it not.
+
+`python -m engine.test_pyo3 --standin` runs both passes against a Python
+stand-in for the Rust class, to check the harness itself without a build.
+
 Skips cleanly (exit 0) when the extension is not built:
     cd rust; python -m pip install .
 """
@@ -113,6 +122,97 @@ def run(rust_book_cls):
     return seen
 
 
+# ---- submit_many ----------------------------------------------------------
+# The batch call must be indistinguishable from the single calls in sequence,
+# on each engine and across them. Three books get the same stream: a Python
+# book driven one call at a time (the reference), and a Python and a Rust
+# book driven through submit_many in random-sized chunks.
+
+def run_batched(rust_book_cls, seed=SEED + 1):
+    ref = PyBook(clock=counter_clock())
+    pyb, rs = PyBook(clock=counter_clock()), rust_book_cls(deterministic=True)
+    ops = gen_ops(N_OPS, seed)
+    rnd = random.Random(seed)
+    i = seen = chunks = 0
+    while i < len(ops):
+        chunk = ops[i:i + rnd.choice((1, 2, 3, 5, 8, 13, 40, 200))]
+        want = [apply(ref, op) for op in chunk]
+        got_py, got_rs = pyb.submit_many(chunk), rs.submit_many(chunk)
+        assert type(got_py) is list and type(got_rs) is list
+        for k, (w, a, b) in enumerate(zip(want, got_py, got_rs)):
+            assert w == a == b and type(w) is type(a) is type(b), (
+                f"op {i + k} {chunk[k]}: single {w!r}, python batch {a!r}, rust batch {b!r}")
+        assert len(want) == len(got_py) == len(got_rs), f"chunk at op {i}: result count"
+
+        # Python batch vs Python singles: identical including ts (both use a
+        # counter clock). Rust vs Python: identical except ts, as in run().
+        er, ep, ers = ref.events_since(seen), pyb.events_since(seen), rs.events_since(seen)
+        assert er == ep, f"chunk at op {i}: python batch events differ from single calls"
+        assert len(er) == len(ers), f"chunk at op {i}: {len(er)} vs {len(ers)} new events"
+        for x, y in zip(er, ers):
+            assert x[:-1] == y[:-1], f"chunk at op {i}:\n  python {x}\n  rust   {y}"
+        seen += len(er)
+        i += len(chunk)
+        chunks += 1
+        if chunks % 50 == 0 or i == len(ops):
+            assert state(ref) == state(pyb) == state(rs), f"state differs after op {i}"
+
+    # Bad input inside a batch: the same ValueError as the single call, the
+    # ops before it applied, the ops after it not. This mirrors the single
+    # calls exactly: they would have applied the earlier ops and then raised.
+    good_before, good_after = ("L", "B", 500, 3), ("L", "S", 1_500, 4)
+    bad_ops = [("L", "X", 100, 1), ("L", "B", 100, 0), ("L", "B", 100, -3),
+               ("L", "B", 100, 0.5), ("L", "B", 100.5, 1), ("M", "B", 0),
+               ("L", "B", 100.0, 1), ("L", "B", 100, 1.0), ("L", "B", 0, 1),
+               ("L", "S", -5, 1), ("M", "S", 2.5), ("M", "", 1)]
+    # Malformed commands: no single-call equivalent, so both engines must
+    # simply agree (ValueError, earlier ops applied).
+    malformed = [("Q", 1), ("L", "B", 100), ("M", "B"), ("X",), (), ("M", "B", 1, 2),
+                 ("X", 1, 2), (5, "B", 1), ("l", "B", 100, 1), ["L", "B", 100, 1], "L", None]
+    for bad, has_single in [(b, True) for b in bad_ops] + [(b, False) for b in malformed]:
+        n0 = ref.event_count()
+        apply(ref, good_before)
+        if has_single:
+            try:
+                apply(ref, bad)
+                raise AssertionError(f"single call accepted {bad}")
+            except ValueError:
+                pass
+        for book in (pyb, rs):
+            try:
+                book.submit_many([good_before, bad, good_after])
+                raise AssertionError(f"{type(book).__module__} batch accepted {bad!r}")
+            except ValueError:
+                pass
+        new = ref.events_since(n0)
+        # good_before was applied (it may also trade), good_after was not.
+        assert [e[0] for e in new].count("accepted") == 1, new
+        assert pyb.events_since(n0) == new, f"python batch after {bad!r}"
+        assert [e[:-1] for e in rs.events_since(n0)] == [e[:-1] for e in new], \
+            f"rust batch after {bad!r}"
+        assert state(ref) == state(pyb) == state(rs), f"state differs after bad batch {bad!r}"
+    assert pyb.submit_many([]) == [] and rs.submit_many([]) == []
+    # Any iterable of ops, as with a list.
+    gen = (op for op in [("L", "B", 600, 1), ("X", 10**9)])
+    assert pyb.submit_many(gen) == rs.submit_many(iter([("L", "B", 600, 1), ("X", 10**9)]))
+    assert state(pyb) == state(rs)
+    return chunks, seen
+
+
+def _standin():
+    """A Python class shaped like the Rust one: Book(deterministic=True).
+
+    Running the harness against it checks the harness itself (and that
+    submit_many on the Python engine equals single calls) without a Rust
+    build: `python -m engine.test_pyo3 --standin`.
+    """
+    class StandIn(PyBook):
+        def __init__(self, deterministic=False):
+            super().__init__(clock=counter_clock() if deterministic else None)
+    StandIn.__module__ = "standin"
+    return StandIn
+
+
 def demo():
     try:
         from bullpen_engine import Book as RustBook
@@ -127,8 +227,18 @@ def demo():
         return
     n = run(RustBook)
     print(f"ok — {N_OPS} ops, {n} events identical between Python and Rust (PyO3)")
+    chunks, n = run_batched(RustBook)
+    print(f"ok — submit_many: {N_OPS} ops in {chunks} batches, {n} events identical "
+          f"to single calls on both engines; bad ops raise identically")
 
 
 if __name__ == "__main__":
-    demo()
+    if "--standin" in sys.argv:
+        StandIn = _standin()
+        n = run(StandIn)
+        chunks, m = run_batched(StandIn)
+        print(f"ok — harness vs Python stand-in: {n} events (single calls), "
+              f"{m} events in {chunks} batches")
+    else:
+        demo()
     sys.exit(0)

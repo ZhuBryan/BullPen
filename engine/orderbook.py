@@ -38,10 +38,14 @@ from dataclasses import dataclass
 
 BUY, SELL = "B", "S"
 
+_BAD_OP = ("each op must be a tuple ('L', side, price, qty), "
+           "('M', side, qty) or ('X', order_id)")
 
-def monotonic_ns():
-    """Default clock. Monotonic so it cannot run backwards mid-session."""
-    return time.perf_counter_ns()
+
+# Default clock: monotonic, so it cannot run backwards mid-session. The C
+# function itself rather than a Python wrapper around it: the clock is read
+# once per event, and a wrapper frame cost more than the read (profiled).
+monotonic_ns = time.perf_counter_ns
 
 
 def counter_clock():
@@ -60,7 +64,7 @@ def counter_clock():
     return tick
 
 
-@dataclass
+@dataclass(slots=True)   # slots: faster attribute access, less memory per order
 class Order:
     id: int
     side: str
@@ -88,20 +92,15 @@ class Book:
         self._ask_prices: list[int] = []
         self._bid_live: dict[int, int] = {}      # price -> live (uncancelled) orders
         self._ask_live: dict[int, int] = {}
+        # side -> (queues, sorted prices, live counts), built once: the hot
+        # paths look a side up on every order, and building that tuple per
+        # call showed up in the profile.
+        self._side = {BUY: (self.bids, self._bid_prices, self._bid_live),
+                      SELL: (self.asks, self._ask_prices, self._ask_live)}
 
     # ---- level bookkeeping ---------------------------------------------
     def _levels(self, side):
-        if side == BUY:
-            return self.bids, self._bid_prices, self._bid_live
-        return self.asks, self._ask_prices, self._ask_live
-
-    def _del_level(self, side, price):
-        book, prices, live = self._levels(side)
-        book.pop(price, None)
-        live.pop(price, None)
-        i = bisect_left(prices, price)
-        if i < len(prices) and prices[i] == price:
-            prices.pop(i)
+        return self._side[BUY if side == BUY else SELL]
 
     # ---- introspection -------------------------------------------------
     def best_bid(self):
@@ -112,15 +111,26 @@ class Book:
 
     def depth(self, side, levels=5):
         book, prices, _ = self._levels(side)
-        chosen = prices[::-1][:levels] if side == BUY else prices[:levels]
-        return [(p, sum(o.remaining for o in book[p] if not o.cancelled))
-                for p in chosen]
+        if side != BUY:
+            chosen = prices[:levels]
+        elif levels is not None and levels > 0:
+            chosen = prices[-levels:][::-1]   # copy only the levels asked for
+        else:
+            chosen = prices[::-1][:levels]    # same slice as always, odd inputs included
+        out = []
+        for p in chosen:
+            q = 0
+            for o in book[p]:                 # skip husks of lazy cancels
+                if not o.cancelled:
+                    q += o.remaining
+            out.append((p, q))
+        return out
 
     # ---- portable interface --------------------------------------------
     # The subset of Book that the Rust port also exposes through PyO3 (see
     # SPEC.md section 7). Code that should run on either engine (the market
     # simulator, the order-book backtester) uses only these plus limit /
-    # market / cancel / best_bid / best_ask / depth, never `events` or
+    # market / cancel / submit_many / best_bid / best_ask / depth, never `events` or
     # `orders` directly: handing a whole Rust-side list to Python on every
     # step would turn an O(n) simulation into O(n^2) copying.
     def event_count(self):
@@ -134,6 +144,41 @@ class Book:
 
     def order_ids(self):
         return list(self.orders)
+
+    def submit_many(self, ops):
+        """Apply a list of commands in order; return one result per command.
+
+            ("L", side, price, qty)  -> limit(side, price, qty)  -> order id
+            ("M", side, qty)         -> market(side, qty)        -> order id
+            ("X", order_id)          -> cancel(order_id)         -> bool
+
+        Exactly equivalent to making the single calls one after another: same
+        events, same ids, same validation, same exceptions. That includes what
+        happens on bad input: the bad command raises the same ValueError its
+        single call would, the commands before it STAY APPLIED (they already
+        happened, as they would have with separate calls), and the ones after
+        it are not run. A malformed command (unknown tag, wrong length, not a
+        tuple) raises ValueError at its position in the same way.
+
+        Why it exists: on the Rust engine every call from Python pays a fixed
+        cost to cross the language boundary and convert its arguments, however
+        little work the call does. A market maker requoting two orders, or
+        cancelling ten, is one crossing instead of two or ten. Here in Python
+        it is just a loop, kept so both engines share one interface.
+        """
+        out = []
+        for op in ops:
+            n = len(op) if isinstance(op, tuple) else 0
+            tag = op[0] if n else None
+            if tag == "L" and n == 4:
+                out.append(self.limit(op[1], op[2], op[3]))
+            elif tag == "M" and n == 3:
+                out.append(self.market(op[1], op[2]))
+            elif tag == "X" and n == 2:
+                out.append(self.cancel(op[1]))
+            else:
+                raise ValueError(_BAD_OP)
+        return out
 
     # ---- commands ------------------------------------------------------
     def limit(self, side, price, qty):
@@ -151,11 +196,18 @@ class Book:
             self.events.append(("reject_cancel", order_id, self._seq, self._clock()))
             return False
         o.cancelled = True
-        _, _, live = self._levels(o.side)
-        if o.price in live:
-            live[o.price] -= 1
-            if live[o.price] <= 0:
-                self._del_level(o.side, o.price)
+        book, prices, live = self._side[o.side]
+        p = o.price
+        n = live.get(p)
+        if n is not None:
+            if n > 1:
+                live[p] = n - 1
+            else:                     # last live order: the level goes too
+                book.pop(p, None)
+                del live[p]
+                i = bisect_left(prices, p)
+                if i < len(prices) and prices[i] == p:
+                    prices.pop(i)
         self._seq += 1
         self.events.append(("canceled", order_id, o.remaining, self._seq, self._clock()))
         return True
@@ -172,12 +224,19 @@ class Book:
         # did arithmetic in floating point somewhere upstream, which is how
         # money drifts. This is also exactly what the Rust engine accepts, so
         # the two can't disagree on input (engine/test_pyo3.py checks it).
-        if isinstance(qty, float) or int(qty) != qty:
+        # (`type(x) is int` is only a fast path for the common case: a plain
+        # int passes every check below except the sign, so skip straight to it.)
+        if type(qty) is not int and (isinstance(qty, float) or int(qty) != qty):
             raise ValueError("qty must be a whole number of shares")
-        if price is not None and (isinstance(price, float) or int(price) != price or price <= 0):
-            raise ValueError("price must be a positive whole number of ticks")
-        price = int(price) if price is not None else None
-        o = Order(self._next_id, side, price, int(qty), int(qty))
+        if price is not None:
+            if type(price) is not int:
+                if isinstance(price, float) or int(price) != price:
+                    raise ValueError("price must be a positive whole number of ticks")
+                price = int(price)
+            if price <= 0:
+                raise ValueError("price must be a positive whole number of ticks")
+        q = int(qty)
+        o = Order(self._next_id, side, price, q, q)
         self._next_id += 1
         self._seq += 1
         self.events.append(("accepted", o.id, side, price, qty, self._seq, self._clock()))
@@ -192,28 +251,31 @@ class Book:
         return o.id
 
     def _rest(self, o):
-        book, prices, live = self._levels(o.side)
-        if o.price not in book:
-            book[o.price] = deque()
-            live[o.price] = 0
-            insort(prices, o.price)
-        book[o.price].append(o)
-        live[o.price] += 1
+        book, prices, live = self._side[o.side]
+        p = o.price
+        level = book.get(p)
+        if level is None:
+            book[p] = deque((o,))
+            live[p] = 1
+            insort(prices, p)
+        else:
+            level.append(o)
+            live[p] += 1
         self.orders[o.id] = o
 
-    def _crosses(self, o, best):
-        if best is None:
-            return False
-        if o.price is None:           # market order takes any price
-            return True
-        return o.price >= best if o.side == BUY else o.price <= best
-
     def _match(self, o):
-        opp_side = SELL if o.side == BUY else BUY
-        opp, _, live = self._levels(opp_side)
-        while o.remaining:
-            best = self.best_ask() if o.side == BUY else self.best_bid()
-            if not self._crosses(o, best):
+        # Sweep the opposite side while the order crosses: a buy crosses an
+        # ask at or below its limit, a sell a bid at or above it, and a
+        # market order (no limit) crosses anything. Written out inline, with
+        # no helper calls, because this runs for every incoming order and
+        # most of them cross nothing.
+        buy = o.side == BUY
+        opp, prices, live = self._side[SELL if buy else BUY]
+        limit = o.price                   # None = market order, takes any price
+        events, clock, orders = self.events, self._clock, self.orders
+        while o.remaining and prices:
+            best = prices[0] if buy else prices[-1]
+            if limit is not None and (limit < best if buy else limit > best):
                 break
             level = opp[best]
             while o.remaining and level:
@@ -225,14 +287,17 @@ class Book:
                 o.remaining -= traded
                 resting.remaining -= traded
                 self._seq += 1
-                self.events.append(
-                    ("trade", best, traded, o.id, resting.id, self._seq, self._clock()))
+                events.append(("trade", best, traded, o.id, resting.id, self._seq, clock()))
                 if resting.remaining == 0:
                     level.popleft()
                     live[best] -= 1
-                    self.orders.pop(resting.id, None)
+                    orders.pop(resting.id, None)
             if live.get(best, 0) <= 0:
-                self._del_level(opp_side, best)
+                # The level is used up. It is the best one, so it sits at the
+                # end of the sorted price list nearest the spread.
+                del opp[best]
+                live.pop(best, None)
+                prices.pop(0 if buy else -1)
 
 
 # ---------------------------------------------------------------------------

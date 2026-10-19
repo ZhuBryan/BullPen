@@ -19,23 +19,34 @@ both.
 """
 
 import os
+import warnings
 
 try:
     from engine.orderbook import Book as PyBook
 except ImportError:
     from orderbook import Book as PyBook
 
+# SPEC.md 7.1: the only methods simulator / backtester code may call.
+# submit_many(ops) batches limit/market/cancel calls into one (see orderbook.py).
+PORTABLE = ("limit", "market", "cancel", "best_bid", "best_ask", "depth",
+            "event_count", "events_since", "has_order", "order_ids", "submit_many")
+
 Book, ENGINE = PyBook, "python"
 if os.environ.get("BULLPEN_ENGINE", "").lower() != "python":
     try:
-        from bullpen_engine import Book  # noqa: F811  (the point: shadow PyBook)
-        ENGINE = "rust"
+        from bullpen_engine import Book as _RustBook
     except ImportError:
         pass
-
-# SPEC.md 7.1: the only methods simulator / backtester code may call.
-PORTABLE = ("limit", "market", "cancel", "best_bid", "best_ask", "depth",
-            "event_count", "events_since", "has_order", "order_ids")
+    else:
+        _missing = [m for m in PORTABLE if not callable(getattr(_RustBook, m, None))]
+        if _missing:
+            # An extension built from older sources: using it would crash the
+            # first caller of the missing method, so run on Python instead,
+            # loudly. Rebuild with `python -m pip install .` in engine/rust.
+            warnings.warn(f"bullpen_engine is out of date (lacks {_missing}); "
+                          f"using the Python engine. Rebuild it in engine/rust.")
+        else:
+            Book, ENGINE = _RustBook, "rust"
 
 
 def demo():
@@ -62,6 +73,27 @@ def demo():
     trades = [e for e in b.events_since(0) if e[0] == "trade"]
     assert [t[:5] for t in trades] == [("trade", 100, 4, bid, ask)]
     assert b.market("B", 5) == 3 and b.best_bid() is None, "market orders never rest"
+
+    # submit_many: one call, same results as the single calls in sequence.
+    n = b.event_count()
+    got = b.submit_many([("L", "S", 101, 5), ("L", "S", 102, 5), ("M", "B", 7),
+                         ("X", 5), ("X", 5), ("L", "B", 99, 1)])
+    assert got == [4, 5, 6, True, False, 7], got
+    assert [type(x) for x in got[3:5]] == [bool, bool]
+    assert [e[0] for e in b.events_since(n)] == [
+        "accepted", "accepted", "accepted", "trade", "trade", "canceled",
+        "reject_cancel", "accepted"]
+    assert b.depth("S") == [] and b.depth("B") == [(99, 1)] and b.submit_many([]) == []
+    # A bad op raises like its single call; the ops before it stay applied.
+    for bad_ops in ([("L", "B", 98, 1), ("L", "B", 100, 0)], [("L", "B", 98, 1), ("Q", 1)],
+                    [("L", "B", 98, 1), ("M", "B")], [("L", "B", 98, 1), ["X", 1]]):
+        before = b.event_count()
+        try:
+            b.submit_many(bad_ops)
+            raise AssertionError(f"bad batch accepted: {bad_ops}")
+        except ValueError:
+            pass
+        assert [e[0] for e in b.events_since(before)] == ["accepted"], "first op must stand"
 
     for bad in (lambda: b.limit("X", 100, 1), lambda: b.limit("B", 100, 0),
                 lambda: b.limit("B", 100, 0.5), lambda: b.limit("B", 100.5, 1),

@@ -51,6 +51,12 @@ def gen_ops(n, seed):
             price = 1_000 - off if side == "B" else 1_000 + off
             if rnd.random() < 0.2:                           # aggressive limit, sweeps levels
                 price = 1_000 + off if side == "B" else 1_000 - off
+            if rnd.random() < 0.02:
+                # Rare extremes: 1 tick (a sell there sweeps every bid) and
+                # prices near the top of what the integer types must hold, so
+                # level ordering and overflow-adjacent values are exercised,
+                # not only the 990-1010 band around the market.
+                price = rnd.choice((1, 2, 10**9, 10**12, 2**53))
             ops.append(("L", side, price, rnd.randint(1, 60)))
             issued += 1
     return ops
@@ -94,6 +100,8 @@ def run(rust_book_cls):
     # Both must refuse the same bad input, with the same exception type.
     for bad in (("L", "X", 100, 1), ("L", "B", 100, 0), ("L", "B", 100, -3),
                 ("L", "B", 100, 0.5), ("L", "B", 100.5, 1), ("M", "B", 0),
+                ("L", "B", 100.0, 1), ("L", "B", 100, 1.0),      # whole floats
+                ("L", "B", 0, 1), ("L", "S", -5, 1),             # non-positive prices
                 ("M", "S", 2.5), ("M", "", 1)):
         for book in (py, rs):
             try:

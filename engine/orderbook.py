@@ -168,10 +168,14 @@ class Book:
         # int() here would turn a 0.5 order into 0: accepted, never rested,
         # never cancelled, and therefore missing from the shares ledger. Reject
         # loudly instead, and make the caller choose a lot size.
-        if int(qty) != qty:
+        # A float is refused even when it is whole (100.0): it means the caller
+        # did arithmetic in floating point somewhere upstream, which is how
+        # money drifts. This is also exactly what the Rust engine accepts, so
+        # the two can't disagree on input (engine/test_pyo3.py checks it).
+        if isinstance(qty, float) or int(qty) != qty:
             raise ValueError("qty must be a whole number of shares")
-        if price is not None and int(price) != price:
-            raise ValueError("price must be a whole number of ticks")
+        if price is not None and (isinstance(price, float) or int(price) != price or price <= 0):
+            raise ValueError("price must be a positive whole number of ticks")
         price = int(price) if price is not None else None
         o = Order(self._next_id, side, price, int(qty), int(qty))
         self._next_id += 1

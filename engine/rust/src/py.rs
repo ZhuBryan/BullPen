@@ -124,7 +124,10 @@ impl PyBook {
     ) -> PyResult<u64> {
         let side = parse_side(side)?;
         let qty = parse_qty(qty)?;
-        let price = whole(price, "price must be a whole number of ticks")?;
+        let price = whole(price, "price must be a positive whole number of ticks")?;
+        if price <= 0 {
+            return Err(bad("price must be a positive whole number of ticks"));
+        }
         Ok(self.inner.limit(side, price, qty))
     }
 

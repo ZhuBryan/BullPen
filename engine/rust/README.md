@@ -66,4 +66,4 @@ The sorted-list trick exists in Python only because `max(dict)` there is an inte
 
 Run the Python baseline (`python ../bench.py`) and this benchmark **on the same machine**, in the same session. A ratio between numbers measured on different hardware, or against a cloud sandbox with noisy neighbours, is not a result.
 
-Both harnesses use the same methodology: warmup discarded, throughput measured as wall time over N operations so no per-op timer cost leaks into it, latency percentiles measured per operation with the timer's own median cost printed alongside, and a fixed seed. Quote p50, p99 and p99.9 — in trading the tail is the number that matters, because the slow path is the one that runs when the market is moving.
+Both harnesses use the same methodology: warmup discarded, throughput measured as wall time over N operations so no per-op timer cost leaks into it, latency percentiles measured per operation with the timer's own median cost printed alongside, and a fixed seed. Quote p50, p99 and p99.9: in trading the tail is the number that matters, because the slow path is the one that runs when the market is moving.

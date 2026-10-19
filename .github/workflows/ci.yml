@@ -71,6 +71,7 @@ jobs:
         working-directory: engine
         run: python diff_test.py check ops.txt 20000
       - name: Criterion benches compile
+        if: runner.os == 'Linux'        # one OS is enough to know it builds
         working-directory: engine/rust/bench
         run: cargo bench --no-run
 
@@ -98,6 +99,13 @@ jobs:
         run: python engine/test_pyo3.py
       - name: The app now runs on the Rust engine
         run: python -c "from engine.fastbook import ENGINE; assert ENGINE == 'rust', ENGINE; print('engine:', ENGINE)"
+      - name: Engine self-checks with Rust present (fastbook demo runs on the binding)
+        working-directory: engine
+        env:
+          BULLPEN_REQUIRE_RUST: "1"
+        run: |
+          pip install websockets
+          python test.py
       - name: Whole backend suite on the Rust book
         run: |
           python backend/test_bullpen.py
@@ -128,12 +136,14 @@ jobs:
         run: python bench.py --repeats 5 --ops-file ops.txt --json ../bench-python.json
       - name: Rust benchmark and lock-free pipeline
         working-directory: engine/rust
+        shell: bash          # explicit bash adds -o pipefail: `cmd | tee` fails if cmd fails
         run: |
           cargo build --release
           ./target/release/bullpen_engine bench ../ops.txt | tee ../../bench-rust.txt
           ./target/release/bullpen_engine pipeline ../ops.txt | tee -a ../../bench-rust.txt
       - name: Criterion
         working-directory: engine/rust/bench
+        shell: bash
         run: cargo bench | tee ../../../bench-criterion.txt
       - uses: actions/upload-artifact@v4
         with:

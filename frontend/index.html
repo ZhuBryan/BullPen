@@ -1588,7 +1588,10 @@ function backtestCards(m, returnLabel = 'Return', extra = []) {
 
 // Escape HTML for user-supplied strings rendered into innerHTML.
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Quotes too: the same helper fills attribute values like <option value="">,
+  // where an unescaped " would end the attribute early.
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 // Chart.js ships its own font stack, which would render axis labels and

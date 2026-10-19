@@ -20,6 +20,10 @@ use std::hint::black_box;
 use bullpen_engine::{Book, OrderId, Side};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 
+// ponytail: Lcg/Op/make_stream/run_stream duplicate src/main.rs (~55 lines).
+// Moving them into a std-only `pub mod workload` in lib.rs would dedupe them,
+// but that edits compiled code with no compiler in the authoring sandbox. Do
+// it once CI is green, and let CI prove the move.
 /// Same LCG and op mix as src/main.rs, so the numbers are comparable.
 struct Lcg(u64);
 impl Lcg {

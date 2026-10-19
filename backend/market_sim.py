@@ -94,6 +94,12 @@ class MarketMaker(Agent):
         self.spread, self.size, self.max_inv = spread, size, max_inv
         # PnL decomposition, kept in integer ticks*shares so it is exact.
         # A maker's profit has exactly two sources:
+        #   (Note: "fair mid" here is the mid at the start of the step, before
+        #   the maker's own quotes are replaced, so spread capture is NET of
+        #   any adverse selection inside the step. A maker that shades its
+        #   quotes through the mid to shed inventory, as A-S does, can show
+        #   negative spread capture. That is a real cost, not an accounting
+        #   artifact; the identity below holds either way.)
         #   spread capture: buying below (selling above) the fair mid at the
         #                   moment of the fill. This is the reward for
         #                   providing liquidity.

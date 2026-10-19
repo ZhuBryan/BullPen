@@ -188,13 +188,27 @@ The pipeline mode runs the same op file through the lock-free queue and through 
 
 It earned 1.19x: 2.50M ops/sec against 2.10M, with identical event counts. That's less than I expected, and the backpressure counter told me why before I had a chance to invent a story. The producer found the queue full 132,821 times while pushing 20,000 ops. The feed thread was mostly waiting on the matcher, so I was measuring a queue that wasn't the constraint. This is the same lesson as the cancel profiling, from the other side: measure where the time goes before deciding what to optimize. A faster handoff into a matcher that can't keep up mostly buys a faster wait.
 
+## Tests that passed for the wrong reason
+
+The second round of features (order-book backtests, a portfolio layer, a market maker, stylized-facts tests, a FIX session layer) all shipped with self-checks that passed. Then a reviewer who hadn't written any of it went looking for inputs the authors hadn't imagined, and four of those passing tests turned out to be testing the easy case.
+
+**Risk parity.** The goal is weights where every asset contributes the same share of portfolio risk. The code used a popular fixed-point shortcut, and the test checked it on positively correlated assets, where it works. Give it a stock index next to its inverse ETF and it put zero weight on the index, with a 70/30 risk split. On 200 random covariance matrices with mixed-sign correlations it missed on 170. The fix was to solve the problem properly: minimize ½w'Cw minus the average log weight, whose optimum is exactly equal risk contributions, by coordinate descent. It's convex, so it converges for any valid covariance matrix, and the test now includes the inverse-ETF case and the 200 random matrices.
+
+**The cost breakdown.** An order-book backtest trades at the next day's open, through a book, in whole shares. The idealized backtest trades at the close, frictionlessly, in fractional shares. I split the difference into "timing", "cost" and "capacity", and the three summed exactly, which felt like proof. But "timing" compared a whole-share run against a fractional one, so on a 20-year run of a stock that rose 20x, a $1,000 account's inability to buy fractions showed up as about 200 points of "timing". Summing exactly proves the bookkeeping, not the labels. Each term now compares two runs that differ in exactly one thing, rounding is its own term, and the test asserts the property that gives the game away: timing can't depend on account size.
+
+**Autocorrelation.** One stylized fact of real markets is that returns aren't linearly predictable, which you check by comparing autocorrelations against a 95% band. The textbook band assumes independent returns. Real returns are uncorrelated but cluster in volatility, and under clustering that band is too narrow: a series built to be truly unpredictable "failed" 41 times in 100. Swapping in a band that allows for changing volatility brought that to 6, but testing the other direction found a second problem. Lag 1 had been excused entirely (to allow for bid-ask bounce), which hid exactly the lag where simple predictability lives, so a genuinely predictable series was caught only 23 times in 50. Bounce only ever produces *negative* lag-1 correlation, so now only that is excused, and detection went to 45 in 50.
+
+**FIX ownership.** The venue recorded which client owned an order before checking whether the order was a duplicate. So a second client could submit a copy of someone else's order ID, get rejected, and still become its owner, then cancel the original and receive its reports. The happy-path test (one client, valid orders) could never see it. Neither could it see that a resend request starting at minus three million froze every session on the shared event loop.
+
+The common thread is that a self-check written alongside the code tests what the author was thinking about. The fixes were each small. Finding them took someone asking "what's the nastiest input that's still legal?", and every one of those inputs is now a test.
+
 ## Honest limitations
 
 The things this does not do, since a half-built project described accurately is worth more than a finished one described loosely:
 
 - **No C++.** Rust covers the systems ground, but C++ is what most of these job specs ask for, and the differential harness would validate a third port for free.
 - **The matching engine is still single-threaded.** There is now a lock-free SPSC queue and a two-thread pipeline mode measured against a mutex baseline, but the deterministic single-threaded path remains what the differential test runs against, on purpose: an oracle has to be reproducible.
-- **One symbol.** One book, no instrument registry.
+- **Multi-symbol, but not multi-threaded across symbols.** There is an instrument registry and a venue that routes each symbol to its own book, but one thread serves all of them. Sharding symbols across threads is the obvious scaling step, since books don't interact.
 - **Live capture tested against a fake feed, not the real exchange.** A local websocket server speaking Binance's wire format, with a scripted sequence gap. It found a real bug on the first run: a closed socket raised an unhandled exception and killed the recorder, despite the module claiming to handle disconnects. What it does not cover is the real feed's rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
 - **The tail is still allocator-bound.** Both engines show a multi-millisecond worst case, which is the event log growing, not the matching logic. That is why p99.9 is the quoted figure and why the max is shown rather than hidden.
 
@@ -208,4 +222,4 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 A C++ port. The semantics are now pinned by a differential test and the data-structure decisions are already made and documented, so a third implementation costs mostly syntax and gets validated for free by a harness that already exists. That is also the cheapest honest way to learn the language most of these job specs actually ask for.
 
-After that, multi-symbol: an instrument registry, per-symbol books, and a feed handler that demultiplexes. It is less interesting than it sounds, which is exactly why it has not happened yet.
+After that, close the loop on the simulator. Its returns fail two stylized facts that real markets pass: they're predictable a step ahead, and there's no leverage effect. Replaying recorded Binance order books through the engine and running the same tests on them would show which agent behaviour is missing, and a simulator that fails a test you can name is a better starting point than one nobody has tested.

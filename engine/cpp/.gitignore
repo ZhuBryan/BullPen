@@ -1,0 +1,8 @@
+bullpen_cpp
+bullpen_cpp.exe
+bullpen_cpp_debug
+bullpen_cpp_debug.exe
+*.obj
+*.o
+*.pdb
+*.ilk

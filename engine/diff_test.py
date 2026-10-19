@@ -1,9 +1,10 @@
 """
-Differential test: prove the Rust engine behaves exactly like the Python one.
+Differential test: prove the Rust and C++ engines behave exactly like the
+Python one.
 
 A rewrite that is fast but subtly different is worse than no rewrite, because
 every result built on it is quietly wrong. So the Python engine is treated as
-the oracle and the Rust port has to reproduce its event log exactly.
+the oracle and each compiled port has to reproduce its event log exactly.
 
 Both engines are fed the SAME op file rather than each generating its own
 stream, which sidesteps the fact that two languages' RNGs will never agree.
@@ -15,8 +16,11 @@ Usage:
     python diff_test.py replay ops.txt        # print Python's event log
     python diff_test.py check ops.txt         # generate, run both, diff
 
-`check` requires the Rust binary to be built:
-    cd rust && cargo build --release
+`check` compares Python against every compiled engine that is built, and
+reports each separately. It fails if neither is built, or if any built one
+disagrees with Python:
+    cd rust && cargo build --release      # Rust
+    cd cpp && make                        # C++
 """
 
 import random
@@ -29,7 +33,15 @@ try:
 except ImportError:
     from orderbook import BUY, SELL, Book, counter_clock
 
-RUST_BIN = Path(__file__).parent / "rust" / "target" / "release" / "bullpen_engine"
+HERE = Path(__file__).parent
+RUST_BIN = HERE / "rust" / "target" / "release" / "bullpen_engine"
+CPP_BIN = HERE / "cpp" / "bullpen_cpp"
+
+# (name, binary without suffix, build command shown when it is missing)
+ENGINES = [
+    ("rust", RUST_BIN, "cd rust && cargo build --release"),
+    ("c++", CPP_BIN, "cd cpp && make"),
+]
 
 
 def generate(n, seed=42):
@@ -95,6 +107,44 @@ def replay(path):
     return [encode(e) for e in book.events]
 
 
+def find_binary(base):
+    """The built binary, with or without a Windows .exe suffix, else None.
+
+    The native name is tried first, so a stale binary from another OS in the
+    same tree (say a WSL build seen from Windows) cannot shadow a fresh one.
+    """
+    exe = base.with_suffix(".exe")
+    order = (exe, base) if sys.platform == "win32" else (base, exe)
+    for candidate in order:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def compare(name, py, other):
+    """Report one engine against the Python oracle. True if identical."""
+    if py == other:
+        print(f"{name}: IDENTICAL — {len(py)} events matched exactly.")
+        return True
+
+    print(f"{name}: MISMATCH")
+    if len(py) != len(other):
+        print(f"  event count differs: python {len(py)} vs {name} {len(other)}")
+    for i in range(max(len(py), len(other))):
+        a = py[i] if i < len(py) else "<missing>"
+        b = other[i] if i < len(other) else "<missing>"
+        if a != b:
+            print(f"  first difference at event {i}:")
+            print(f"    python: {a}")
+            print(f"    {name + ':':<7} {b}")
+            lo = max(0, i - 3)
+            print("  context (python):")
+            for j in range(lo, min(len(py), i + 4)):
+                print(f"    {j:>6} {py[j]}")
+            break
+    return False
+
+
 def check(path, n=20_000, seed=42):
     Path(path).write_text("\n".join(generate(n, seed)) + "\n")
     print(f"generated {n} ops -> {path}")
@@ -102,34 +152,39 @@ def check(path, n=20_000, seed=42):
     py = replay(path)
     print(f"python: {len(py)} events")
 
-    if not RUST_BIN.exists() and not RUST_BIN.with_suffix(".exe").exists():
-        print(f"\nRust binary not built. Run:\n  cd rust && cargo build --release")
+    ran, failed = 0, 0
+    for name, base, build in ENGINES:
+        binary = find_binary(base)
+        print()
+        if binary is None:
+            print(f"{name}: not built, skipped. Run:\n  {build}")
+            continue
+        try:
+            out = subprocess.run([str(binary), "replay", path],
+                                 capture_output=True, text=True)
+        except OSError as e:
+            # Typically a binary built for another OS (a Windows .exe seen
+            # from WSL or a Linux container). Nothing was compared, so this
+            # counts as not built rather than as a pass or a mismatch.
+            print(f"{name}: {binary.name} found but cannot run here ({e.strerror}), skipped.")
+            print(f"  rebuild for this platform:\n  {build}")
+            continue
+        ran += 1
+        if out.returncode != 0:
+            print(f"{name}: FAILED to replay (exit {out.returncode})")
+            print("  " + out.stderr.strip().replace("\n", "\n  "))
+            failed += 1
+            continue
+        other = out.stdout.splitlines()
+        print(f"{name + ':':<7} {len(other)} events")
+        if not compare(name, py, other):
+            failed += 1
+
+    if ran == 0:
+        print("\nno compiled engine built, nothing to compare against.")
         return 1
-
-    binary = RUST_BIN if RUST_BIN.exists() else RUST_BIN.with_suffix(".exe")
-    out = subprocess.run([str(binary), "replay", path],
-                         capture_output=True, text=True, check=True)
-    rs = out.stdout.splitlines()
-    print(f"rust:   {len(rs)} events")
-
-    if py == rs:
-        print(f"\nIDENTICAL — {len(py)} events matched exactly.")
-        return 0
-
-    print("\nMISMATCH")
-    if len(py) != len(rs):
-        print(f"  event count differs: python {len(py)} vs rust {len(rs)}")
-    for i, (a, b) in enumerate(zip(py, rs)):
-        if a != b:
-            print(f"  first difference at event {i}:")
-            print(f"    python: {a}")
-            print(f"    rust:   {b}")
-            lo = max(0, i - 3)
-            print("  context (python):")
-            for j in range(lo, min(len(py), i + 4)):
-                print(f"    {j:>6} {py[j]}")
-            break
-    return 1
+    print(f"\n{ran - failed}/{ran} compiled engine(s) identical to python.")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

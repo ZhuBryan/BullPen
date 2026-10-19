@@ -1105,6 +1105,16 @@ for bad_req, label in ((PortfolioRequest(tickers=["SPY"]), "one ticker"),
     except HTTPException as e:
         check(e.status_code == 400, f"portfolio {label} -> 400")
 
+# A portfolio that never invests makes corr(port, SPY) = 0/0 = NaN. That used to
+# crash JSON encoding into a 500; every response now maps NaN/inf to null.
+from fastapi.testclient import TestClient
+from backend.main import app as _app
+_r = TestClient(_app).post("/api/portfolio", json={
+    "tickers": ["NEVA", "NEVB"], "start": "2024-06-01", "end": "2024-12-31", "lookback": 20,
+    "strategy": "sma_crossover", "params": {"fast": 200, "slow": 400}})
+check(_r.status_code == 200, f"never-invested portfolio -> 200 (got {_r.status_code})")
+check(_r.json()["risk"].get("corr_spy") is None, "undefined correlation is null, not NaN")
+
 # Metrics expose which engine is serving, and book backtests are timed
 text = metrics_endpoint().body.decode()
 check('bullpen_engine_info{engine="' in text, "metrics report the matching engine in use")

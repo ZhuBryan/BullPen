@@ -28,6 +28,8 @@ No lookahead: weights are decided with data up to the close of day T and
 held from day T+1, the same rule backtest.py applies to signals.
 """
 
+from statistics import NormalDist
+
 import numpy as np
 import pandas as pd
 
@@ -49,12 +51,7 @@ MAX_WEIGHT_POINTS = 300        # downsample the weights-over-time table to this
 #   momentum = MTUM - SPY     (momentum ETF minus market; MTUM starts 2013-04)
 FACTOR_TICKERS = ("SPY", "IWM", "IWD", "IWF", "MTUM")
 
-# Standard normal quantiles / density, so we don't need scipy.
-_Z = {0.95: 1.6448536269514722, 0.99: 2.3263478740408408}
-
-
-def _phi(z):
-    return np.exp(-0.5 * z * z) / np.sqrt(2 * np.pi)
+_N = NormalDist()      # standard normal from the stdlib: quantiles and density
 
 
 def _metrics(ret: np.ndarray, starting_cash: float) -> tuple[dict, np.ndarray]:
@@ -82,14 +79,7 @@ def _target_weights(window: np.ndarray, weighting: str, target_vol: float):
     w = (1 / sd) / (1 / sd).sum()
 
     if weighting == "risk_parity":
-        # Equal risk contribution: we want w_i * (C w)_i equal for every i,
-        # where (C w)_i is how much asset i co-moves with the whole book.
-        # Fixed-point iteration w_i <- 1 / (C w)_i, damped with a square root
-        # so it doesn't oscillate, starting from inverse-vol. Converges fast
-        # for the long-only, positive-definite case we have here.
-        for _ in range(200):
-            w = np.sqrt(w / np.maximum(cov @ w, 1e-18))
-            w /= w.sum()
+        w = _risk_parity(cov, w)
     elif weighting == "vol_target":
         # Ex-ante (forward-looking) portfolio vol = sqrt(w' C w), using the
         # covariance matrix, so correlations count: diversification lowers it.
@@ -103,13 +93,41 @@ def _target_weights(window: np.ndarray, weighting: str, target_vol: float):
     return w, cov
 
 
+def _risk_parity(cov: np.ndarray, w0: np.ndarray, tol=1e-10, sweeps=500) -> np.ndarray:
+    """Equal risk contribution weights: w_i * (C w)_i the same for every asset.
+
+    Solved as the convex problem min 1/2 w'Cw - (1/k) sum(log w_i) (Spinu,
+    2013), whose optimum is exactly equal risk contributions, by cyclical
+    coordinate descent: each step solves one asset's quadratic in closed form.
+    An earlier fixed-point shortcut (w <- sqrt(w / Cw)) looked fine on
+    positively correlated assets but failed on 170 of 200 random matrices with
+    negative correlations (a stock index next to an inverse ETF, say),
+    sometimes loading all the risk on one asset. This converges for any
+    positive-definite C and stays long-only, since the log barrier keeps
+    every weight positive.
+    """
+    k = len(w0)
+    w, b = w0.astype(float).copy(), 1.0 / k
+    cov = cov + np.eye(k) * 1e-12            # tiny ridge: a flat asset can't divide by 0
+    for _ in range(sweeps):
+        for i in range(k):
+            a = cov[i] @ w - cov[i, i] * w[i]
+            w[i] = (-a + np.sqrt(a * a + 4 * cov[i, i] * b)) / (2 * cov[i, i])
+        rc = w * (cov @ w)
+        if np.abs(rc / rc.sum() - b).max() < tol:
+            break
+    return w / w.sum()
+
+
 def _rebalance_mask(dates: pd.DatetimeIndex, rebalance: str) -> np.ndarray:
     """True on the LAST trading day of each month/week: decide at that close."""
     if rebalance == "never":
         return np.zeros(len(dates), dtype=bool)
     period = dates.to_period("M" if rebalance == "monthly" else "W")
     # Day i is a period end if day i+1 falls in a different month/week.
-    return np.r_[np.asarray(period[:-1] != period[1:]), True]
+    # The final day is never a rebalance: a trade there can't be held for a
+    # day, and its commission would be counted in turnover but never charged.
+    return np.r_[np.asarray(period[:-1] != period[1:]), False]
 
 
 def _simulate(R, sig, mask, weighting, target_vol, lookback, commission):
@@ -137,7 +155,7 @@ def _simulate(R, sig, mask, weighting, target_vol, lookback, commission):
             # grows. Cash (1 - sum w) earns 0 here.
             w = w * (1 + R[t]) / (1 + g) if 1 + g > 0 else w
         rebal = t == s or mask[t]
-        if rebal or (sig[t] != sig[t - 1]).any():
+        if t < n - 1 and (rebal or (sig[t] != sig[t - 1]).any()):
             if rebal:   # sizing uses ONLY returns up to and including day t
                 base, cov = _target_weights(R[t - lookback + 1:t + 1], weighting, target_vol)
             # A strategy signal of 0 sends that sleeve to cash (its weight is
@@ -145,7 +163,8 @@ def _simulate(R, sig, mask, weighting, target_vol, lookback, commission):
             target = base * sig[t]
             to = float(np.abs(target - w).sum())   # fraction of equity traded
             pending = to * commission
-            turnovers.append(to)
+            if t > s:
+                turnovers.append(to)   # turnover = re-trading; the initial build isn't
             w = target
             last = (target, cov)
         held[t] = w
@@ -179,9 +198,9 @@ def _var_cvar(ret: np.ndarray) -> dict:
         q = np.quantile(ret, 1 - lvl)
         out[f"var{tag}_hist_pct"] = round(float(-q) * 100, 3)
         out[f"cvar{tag}_hist_pct"] = round(float(-ret[ret <= q].mean()) * 100, 3)
-        z = _Z[lvl]
+        z = _N.inv_cdf(lvl)
         out[f"var{tag}_param_pct"] = round(float(-(mu - z * sd)) * 100, 3)
-        out[f"cvar{tag}_param_pct"] = round(float(-(mu - sd * _phi(z) / (1 - lvl))) * 100, 3)
+        out[f"cvar{tag}_param_pct"] = round(float(-(mu - sd * _N.pdf(z) / (1 - lvl))) * 100, 3)
     return out
 
 
@@ -232,7 +251,7 @@ def _core(close: pd.DataFrame, signals: pd.DataFrame | None, weighting="equal",
         R, sig, mask, weighting, target_vol, lookback, commission_pct)
     metrics, equity = _metrics(net, starting_cash)
     years = len(net) / TRADING_DAYS_PER_YEAR
-    metrics["avg_turnover_pct"] = round(float(np.mean(turns)) * 100, 2)
+    metrics["avg_turnover_pct"] = round(float(np.mean(turns)) * 100, 2) if turns else 0.0
     metrics["annual_turnover_pct"] = round(float(np.sum(turns) / years) * 100, 1)
     metrics["num_rebalances"] = len(turns)
     metrics["avg_gross_exposure_pct"] = round(float(held.sum(1).mean()) * 100, 1)
@@ -266,15 +285,24 @@ def _core(close: pd.DataFrame, signals: pd.DataFrame | None, weighting="equal",
     }
 
 
-def _factor_block(port: pd.Series, start: str, end: str) -> tuple[dict, dict]:
-    """Beta to SPY plus a 4-factor OLS on free ETF proxies."""
+def _factor_block(port: pd.Series, start: str, end: str, real: bool) -> tuple[dict, dict]:
+    """Beta to SPY plus a 4-factor OLS on free ETF proxies.
+
+    real: whether the portfolio itself is on real data. If it is, a factor
+    whose download failed (MTUM before 2013, say) is DROPPED rather than
+    regressed on: get_prices would have handed back a synthetic random walk,
+    and a regression on noise labelled "momentum" is worse than no answer.
+    """
     closes, sources = {}, {}
     for f in FACTOR_TICKERS:
         try:
             df, src = get_prices(f, start, end)
-            closes[f], sources[f] = df["Close"], src
         except Exception:
-            pass
+            continue
+        sources[f] = src
+        if real and src == "sample":
+            continue
+        closes[f] = df["Close"]
     if "SPY" not in closes:
         return {"error": "SPY unavailable"}, sources
     # pct_change per series BEFORE joining, so a late starter (MTUM) is just
@@ -316,8 +344,8 @@ def _factor_block(port: pd.Series, start: str, end: str) -> tuple[dict, dict]:
         "alpha_annual_pct": round(float(coef[0]) * TRADING_DAYS_PER_YEAR * 100, 2),
         "alpha_t_stat": round(float(t[0]), 2),
         "r_squared": round(r2, 3),
-        # The regression only uses days where every factor exists (MTUM
-        # trims anything before 2013-04 with real data); report the window.
+        # The regression only uses days where every included factor has
+        # data; report the window and which factors made it in.
         "window": {"start": str(data.index[0].date()), "end": str(data.index[-1].date()),
                    "n_obs": len(data)},
         "proxies": "market=SPY, size=IWM-SPY, value=IWD-IWF, momentum=MTUM-SPY "
@@ -372,7 +400,8 @@ def run(tickers, start, end, strategy=None, params=None, weighting="equal",
                  float(starting_cash), float(commission_pct))
     dates = core["dates"]
     port = pd.Series(core["net"], index=dates).iloc[1:]
-    fac, fac_sources = _factor_block(port, start, end)
+    fac, fac_sources = _factor_block(port, start, end,
+                                     real=any(v != "sample" for v in sources.values()))
     core["risk"].update(fac)
     core["risk"]["factor_data_sources"] = fac_sources
 
@@ -528,6 +557,24 @@ def demo():
     assert np.ptp(_risk_contrib(rp, cov)) < 1e-6
     assert np.ptp(_risk_contrib(iv, cov)) > np.ptp(_risk_contrib(rp, cov))
     print("  7. weights >= 0, sum <= 1 for all schemes; risk parity contributions equal")
+    # 9. risk parity with NEGATIVE correlations (the case review caught): an
+    # index, its inverse ETF and a bond. Then 200 random covariance matrices
+    # with mixed-sign correlations. Every asset must carry 1/k of the risk.
+    def rc_spread(cov, w):
+        rc = w * (cov @ w)
+        return float(np.abs(rc / rc.sum() - 1 / len(w)).max())
+    vols = np.array([0.18, 0.18, 0.07])
+    corr = np.array([[1.0, -0.95, -0.3], [-0.95, 1.0, 0.25], [-0.3, 0.25, 1.0]])
+    cov3 = corr * np.outer(vols, vols)
+    w3 = _risk_parity(cov3, np.full(3, 1 / 3))
+    assert rc_spread(cov3, w3) < 1e-8 and (w3 > 0).all(), (w3, rc_spread(cov3, w3))
+    rng = np.random.default_rng(11)
+    for _ in range(200):
+        a = rng.normal(size=(10, 14))
+        c = a @ a.T / 14 + np.eye(10) * 0.05          # PD, mixed-sign correlations
+        w = _risk_parity(c, np.full(10, 0.1))
+        assert rc_spread(c, w) < 1e-6 and (w > 0).all() and abs(w.sum() - 1) < 1e-12
+
     print("portfolio demo: all checks passed")
 
 

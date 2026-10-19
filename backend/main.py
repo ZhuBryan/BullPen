@@ -2,6 +2,7 @@
 main.py — the FastAPI web server.
 """
 
+import json
 import math
 import os
 from typing import List, Optional
@@ -9,7 +10,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.ai import AIError, translate as ai_translate
@@ -21,7 +22,30 @@ from backend.regime import REGIMES, classify_regimes, regime_mask
 from backend.rules import rule_positions, validate_rules
 from backend.strategies import STRATEGIES, clean_params as clean_strategy_params
 
-app = FastAPI(title="Bullpen — Trading Arena & Backtester")
+class SafeJSONResponse(JSONResponse):
+    """JSON with NaN/inf turned into null.
+
+    Standard JSON has no NaN, so Starlette refuses to encode it and the request
+    dies as a 500. Degenerate but valid inputs produce NaN legitimately (the
+    correlation of a portfolio that never invested is 0/0), so every response
+    goes through here and the frontend sees null, which fNum shows as a dash.
+    """
+    def render(self, content) -> bytes:
+        return json.dumps(_finite(content), separators=(",", ":")).encode()
+
+
+def _finite(x):
+    if isinstance(x, float):
+        return x if math.isfinite(x) else None
+    if isinstance(x, dict):
+        return {k: _finite(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_finite(v) for v in x]
+    return x
+
+
+app = FastAPI(title="Bullpen — Trading Arena & Backtester",
+              default_response_class=SafeJSONResponse)
 
 # Process-wide metrics. Counters and latency histograms for work actually done,
 # scraped at GET /api/metrics.

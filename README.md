@@ -8,7 +8,7 @@ Two halves. A limit order book exchange built from scratch, and a research platf
 
 Around it sits the rest of a trading stack: **FIX 4.4 over TCP** with a real session layer (heartbeats, sequence-gap recovery, resend and gap fill) feeding an OMS with cancel/replace and average-cost PnL, **pre-trade risk** (price collars, position limits, self-trade prevention), **instrument reference data** with Reg NMS tick regimes and multi-symbol routing, a **lock-free SPSC queue** for the feed-to-matcher handoff, **live Binance L2 capture** with sequence-gap detection and resync, **execution algorithms** (TWAP, VWAP, POV) scored by implementation shortfall, an **Avellaneda-Stoikov market maker**, and **latency histograms** exposed as Prometheus text.
 
-The Rust engine isn't only a benchmark: it's exposed to Python through **PyO3**, and the app's simulator runs on it whenever the extension is built. End to end, a 2,000-step market simulation runs **about 2x faster** on the Rust book (median 0.140s vs 0.063s, identical 2,416 trades). That's far below the engine's 12.7x because the agents' decision logic is still Python, which by Amdahl's law puts matching at roughly half the simulation's time (`python -m engine.bench_sim`). **CI** builds it on every push, proves it matches the Python engine event for event, and then reruns the whole backend test suite on top of it.
+The Rust engine isn't only a benchmark: it's exposed to Python through **PyO3**, and the app's simulator runs on it whenever the extension is built. End to end, a 2,000-step market simulation runs **1.65x to 2.2x faster** on the Rust book (best 0.099s vs 0.060s; identical 2,416 trades). That's far below the engine's 12.7x, and profiling says why: matching is only 47% of the simulation's time, so by Amdahl's law even an infinitely fast engine caps the gain at about 1.9x. The rest is the agents' Python decision logic (`python -m engine.bench_sim`). **CI** builds it on every push, proves it matches the Python engine event for event, and then reruns the whole backend test suite on top of it.
 
 **The platform** is a paper-trading arena and research workbench: write trading rules in plain English or a small safe DSL, race strategies against each other, and stress-test them with a parameter optimizer, walk-forward validation, Monte Carlo, and a market-regime detector. Backtests can fill against a modelled **order book** instead of the closing price, multi-asset **portfolios** get proper risk numbers (VaR, CVaR, beta, factor exposure), and a **stylized-facts** check asks whether the simulated market behaves like a real one.
 
@@ -16,7 +16,7 @@ No paid APIs, no API keys. Free Yahoo Finance data with a synthetic offline fall
 
 **Live demo: [bullpen-858e.onrender.com](https://bullpen-858e.onrender.com)**
 
-There is a [technical writeup](WRITEUP.md) covering the optimization work and, more usefully, the parts I got wrong.
+There is a [technical writeup](https://zhubryan.github.io/BullPen/WRITEUP) covering the optimization work and, more usefully, the parts I got wrong.
 
 ## Quick start
 
@@ -126,6 +126,8 @@ Pick 2 to 10 tickers and a sizing scheme:
 - **Inverse volatility**: calmer assets get more money, so each moves the account by a similar amount.
 - **Volatility target**: inverse-vol weights scaled so the forecast portfolio volatility hits a target. It never borrows, so in calm markets it just holds cash.
 - **Risk parity**: every asset contributes the same share of total risk, solved exactly (including when assets are negatively correlated, which a common shortcut gets wrong).
+
+On real data (SPY, TLT, GLD and QQQ, 2015 to 2024) every scheme landed at a Sharpe ratio of about 0.92: risk-based sizing cut volatility and drawdown (vol targeting took max drawdown from -25.6% to -20.4%) but didn't improve return per unit of risk, and monthly rebalancing gave up about 38 points of return against buy and hold by repeatedly trimming QQQ. That's the honest, textbook result, and the tool shows it rather than hiding it.
 
 Weights are decided with data up to day T and held from T+1, rebalanced monthly or weekly. Results include the equity curve against equal-weight buy and hold, weights over time, historical and parametric VaR and CVaR at 95% and 99%, beta to SPY, a factor regression on free ETF proxies (market, size, value, momentum) with t-stats, the correlation matrix, and each asset's share of portfolio risk.
 

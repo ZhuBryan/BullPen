@@ -18,8 +18,9 @@ downstream is fiction. Both are asserted after every single step.
 
 Four agent species, because a market of one strategy is not a market:
 
-  MarketMaker   quotes both sides, earns the spread, and skews its quotes to
-                shed inventory. This is the agent that supplies liquidity, so
+  MarketMaker   quotes both sides around the microprice of everyone else's
+                orders, earns the spread, and skews its quotes to shed
+                inventory. This is the agent that supplies liquidity, so
                 without it the book is empty and nothing trades.
   Momentum      buys strength, sells weakness. Destabilizing: it amplifies moves.
   MeanReverter  fades moves back toward a slow average. Stabilizing.
@@ -124,10 +125,64 @@ class MarketMaker(Agent):
         """Dollar decomposition. total == spread + inventory exactly (see step)."""
         return {"spread": self.spread_ticks * TICK, "inventory": self.inv_ticks * TICK}
 
+    def fair_value(self, book, mid):
+        """Where this maker thinks the price is, judged from EVERYONE ELSE's orders.
+
+        ROOT CAUSE of the simulator's old trending returns (lag-1 ACF of
+        per-step mid returns about +0.35 in every seed, failing the stylized
+        no-autocorrelation test 10/10). This maker used to centre its quotes
+        on `mid`, which Simulation.step measures BEFORE the makers cancel, so
+        that mid was mostly this maker's OWN previous quotes. Two things
+        follow from centring on yourself:
+
+          * The inventory skew compounds. Quote centre = last centre - skew,
+            so while the maker holds inventory the mid moves by `skew` ticks
+            EVERY step. A skew is meant to be a price offset; self-anchoring
+            turns it into a price velocity, and inventory is very persistent,
+            so returns become persistent. (Ablation, 10 seeds: removing the
+            skew alone drops lag-1 from +0.35 to +0.23.)
+          * Every move is locked in as the new reference. Whatever the
+            momentum trader's market orders knock the mid to, the makers
+            re-centre there next step, so its strongly persistent flow (its
+            per-step buy/sell has lag-1 autocorrelation +0.87) is passed
+            through to the price as persistent impact.
+
+        Centring on the live book after our own cancel (Simulation.step has
+        already pulled our quotes, so whatever is in `book` belongs to
+        others) takes lag-1 to about 0.00 on its own. The A-S maker already
+        did this; the naive maker now does the same, as real makers do.
+
+        Microprice instead of plain mid: the mid ignores queue sizes and only
+        moves when a whole price level is used up, so persistent flow shows
+        up in the price late and in lumps. The microprice weights each side
+        by the OTHER side's size, so it moves as the queue thins, when the
+        flow actually happens (Stoikov 2018: a better predictor of the future
+        mid than the mid). Ablation (10 seeds, with the Momentum fix below):
+        live mid passes no-autocorrelation 7/10, live microprice 9/10.
+        """
+        if book is None:
+            return mid
+        b, a = book.depth(BUY, 1), book.depth(SELL, 1)
+        if not b or not a:
+            return mid                     # one-sided: nothing better to go on
+        (bp, bq), (ap, aq) = b[0], a[0]
+        return math.floor((bq * ap + aq * bp) / (bq + aq) + 0.5)
+
     def act(self, book, mid, history, rnd):
+        fv = self.fair_value(book, mid)
         skew = int(self.spread * (self.position / self.max_inv)) if self.max_inv else 0
-        bid = mid - self.spread - skew
-        ask = mid + self.spread - skew
+        bid = fv - self.spread - skew
+        ask = fv + self.spread - skew
+        # Stay passive: a skewed quote at or through someone else's quote
+        # would execute at once and pay the spread instead of earning it.
+        if book is not None:
+            bb, ba = book.best_bid(), book.best_ask()
+            if ba is not None:
+                bid = min(bid, ba - 1)
+            if bb is not None:
+                ask = max(ask, bb + 1)
+        bid = max(1, bid)
+        ask = max(ask, bid + 1)
         orders = []
         if self.position < self.max_inv:
             orders.append(("limit", BUY, bid, self.size))
@@ -160,7 +215,13 @@ class AvellanedaStoikov(MarketMaker):
     inventory; larger gamma means stronger skew and tighter inventory control.
 
     Units: everything is in TICKS and STEPS. sigma is the std of the mid's
-    per-step change in ticks, (T - t) is in steps, k is per tick, q is shares.
+    per-step change in ticks, (T - t) is in steps, k is per tick, and q is
+    inventory in LOTS (position / order size), as in the model, where each
+    fill moves q by one. An earlier version used shares: with orders of 10,
+    that made the skew 10x too strong, pinned the quotes to the max_offset and
+    passivity clamps, and had the maker pushing the price against its own
+    position (5-step markouts around -8 ticks, PnL around -340 on held-out
+    seeds). In lots, markouts turn positive and PnL is near break-even.
 
     Horizon choice: ROLLING, (T - t) = `horizon` steps, constant. The paper has
     a terminal time (end of the trading day), so risk aversion fades to zero as
@@ -195,7 +256,7 @@ class AvellanedaStoikov(MarketMaker):
     def quotes(self, mid, history):
         """(reservation price, total spread) in ticks, as floats."""
         risk = self.gamma * self.sigma(history) ** 2 * self.horizon
-        r = mid - self.position * risk
+        r = mid - (self.position / self.size) * risk     # q in lots, see Units
         delta = risk + (2 / self.gamma) * math.log(1 + self.gamma / self.k)
         return r, delta
 
@@ -242,30 +303,74 @@ class AvellanedaStoikov(MarketMaker):
 
 
 class Momentum(Agent):
+    """Trend follower: buys while the recent trend is up, sells while down.
+
+    The trend is an exponentially weighted average of per-step mid changes
+    (span = `lookback`), the usual way trend signals are built (EWMA /
+    MACD-style). An earlier version used a boxcar window,
+    history[-1] - history[-lookback]. A boxcar has a sharp edge: every move
+    sits in the signal for exactly lookback-1 steps and then drops out all
+    at once, so this trader's flow (the largest source of aggressive volume
+    here) reverses on a fixed timetable after each move. Once the makers'
+    self-anchoring was fixed, that edge was the main remaining predictability:
+    positive ACF at lags 2..7 and negative from lag 8 (= lookback), failing
+    no-autocorrelation in 7/10 seeds. Exponential weights fade a move out
+    gradually, so there is no edge to trade against. The strategy, its
+    order size and its position limit are unchanged.
+    """
+
     def __init__(self, name, lookback=10, size=5, **kw):
         super().__init__(name, **kw)
         self.lookback, self.size = lookback, size
+        self.trend = 0.0
+        self._seen = 0              # how much of `history` is in the average
 
     def act(self, book, mid, history, rnd):
+        if len(history) < self._seen:             # handed a new history: restart
+            self.trend, self._seen = 0.0, 0
+        a = 2 / (self.lookback + 1)
+        for i in range(max(self._seen, 1), len(history)):
+            self.trend = (1 - a) * self.trend + a * (history[i] - history[i - 1])
+        self._seen = len(history)
         if len(history) <= self.lookback:
             return []
-        change = history[-1] - history[-self.lookback]
-        if change > 0 and self.position < 100:
+        if self.trend > 0 and self.position < 100:
             return [("market", BUY, None, self.size)]
-        if change < 0 and self.position > -100:
+        if self.trend < 0 and self.position > -100:
             return [("market", SELL, None, self.size)]
         return []
 
 
 class MeanReverter(Agent):
+    """Fades moves: buys when the price is `band` ticks below its slow average.
+
+    This is the simulator's arbitrageur, the agent that leans against the
+    momentum trader's predictable flow. The slow average is exponentially
+    weighted (span = `lookback`) for the same reason as Momentum's trend: a
+    boxcar (simple moving average) drops every price out of the average all
+    at once, `lookback` steps later, which put a fixed-timetable reversal into
+    this trader's flow. With the boxcar, the fixed simulator still showed a
+    small negative ACF at lags 2..16 that failed no-autocorrelation in 12 of
+    30 seeds (mostly at lags 12-15); with the EWMA, 5 of 30. Same strategy,
+    size, band and position limit.
+    """
+
     def __init__(self, name, lookback=30, size=5, band=8, **kw):
         super().__init__(name, **kw)
         self.lookback, self.size, self.band = lookback, size, band
+        self.avg = None
+        self._seen = 0
 
     def act(self, book, mid, history, rnd):
+        if len(history) < self._seen:             # handed a new history: restart
+            self.avg, self._seen = None, 0
+        a = 2 / (self.lookback + 1)
+        for i in range(self._seen, len(history)):
+            self.avg = history[i] if self.avg is None else (1 - a) * self.avg + a * history[i]
+        self._seen = len(history)
         if len(history) < self.lookback:
             return []
-        avg = sum(history[-self.lookback:]) / self.lookback
+        avg = self.avg
         if mid < avg - self.band and self.position < 100:
             return [("market", BUY, None, self.size)]
         if mid > avg + self.band and self.position > -100:
@@ -310,6 +415,7 @@ class Simulation:
         self.history = [start]
         self.bars = []
         self._seen_events = 0
+        self.last_flow = 0
         self._start_cash = sum(a.cash for a in self.agents)
 
     # ---- helpers -------------------------------------------------------
@@ -331,6 +437,9 @@ class Simulation:
     def _settle(self):
         """Attribute every new trade event to both sides."""
         prices = []
+        # Signed aggressor volume this step (+ = buyers lifting offers), the
+        # "trade flow" an order-flow forecast reads (backend/forecast.py).
+        self.last_flow = 0
         for ev in self.book.events_since(self._seen_events):
             if ev[0] != "trade":
                 continue
@@ -340,6 +449,9 @@ class Simulation:
                 who = self.owner.get(oid)
                 if who:
                     who[0].on_fill(who[1], price, qty)
+            agg = self.owner.get(aggressor_id)
+            if agg:
+                self.last_flow += qty if agg[1] == BUY else -qty
             prices.append(price)
         self._seen_events = self.book.event_count()
         return prices
@@ -567,6 +679,37 @@ def demo():
     # at max inventory the maker must stop adding to it
     assert BUY not in quotes(200), "maker must stop bidding when fully long"
     assert SELL not in quotes(-200), "maker must stop offering when fully short"
+
+    # Fair value comes from the live book (others' orders), as a microprice:
+    # a big bid queue against a thin ask pulls fair value toward the ask.
+    b = Book()
+    b.limit(BUY, 9_990, 90)
+    b.limit(SELL, 10_000, 10)
+    mm = MarketMaker("m", spread=4)
+    assert mm.fair_value(b, 5_000) == 9_999, mm.fair_value(b, 5_000)
+    q = {side: p for _, side, p, _ in mm.act(b, 5_000, [], None)}
+    assert q == {BUY: 9_995, SELL: 10_003}, q   # centred on 9_999, not the stale 5_000
+    # and it stays passive when a full skew would put its bid on someone
+    # else's ask (fully short: skew = -spread, bid = fair value = best ask)
+    b2 = Book()
+    b2.limit(BUY, 9_990, 1_000)
+    b2.limit(SELL, 10_000, 1)
+    short = MarketMaker("m", spread=4, max_inv=200)
+    short.position = -200
+    assert short.fair_value(b2, 9_995) == 10_000
+    q = {side: p for _, side, p, _ in short.act(b2, 9_995, [], None)}
+    assert q == {BUY: 9_999}, q
+
+    # The root-cause regression check: per-step mid returns must not trend.
+    # Before the fix lag-1 autocorrelation was about +0.35 in every seed.
+    for sd in (7, 8):
+        s = Simulation(seed=sd)
+        s.run(3000)
+        r = [math.log(b_ / a_) for a_, b_ in zip(s.history, s.history[1:])]
+        m_ = sum(r) / len(r)
+        d = [x - m_ for x in r]
+        lag1 = sum(x * y for x, y in zip(d, d[1:])) / sum(x * x for x in d)
+        assert lag1 < 0.1, f"seed {sd}: mid returns trend again, lag-1 ACF {lag1:+.3f}"
 
     # ---- Avellaneda-Stoikov ----
     def as_quotes(pos, gamma=0.1):

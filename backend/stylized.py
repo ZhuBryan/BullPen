@@ -227,10 +227,11 @@ def _findings(real, sim, source):
                    "one-tick jumps), not a power-law tail; compare the Hill alpha.")
     if sim["acf"][0] > 3 * sim["band"]:
         out.append(f"Simulator returns trend: lag-1 ACF {sim['acf'][0]:+.2f} (band "
-                   f"+/-{sim['band']:.3f}). Real prices are close to unpredictable; here "
-                   "momentum agents chase moves and the mid tends to walk one tick at a "
-                   "time, so a move is likely to be followed by another in the same direction. "
-                   "Nobody in the simulator is arbitraging that predictability away.")
+                   f"+/-{sim['band']:.3f}). Real prices are close to unpredictable. "
+                   "In this simulator that used to happen every run because the market "
+                   "makers centred their quotes on their own previous quotes, so their "
+                   "inventory skew compounded into a drift (see MarketMaker.fair_value); "
+                   "if it shows up again, something is re-anchoring prices on themselves.")
     if not sim["leverage_effect"]["pass"]:
         out.append("No leverage effect in the simulator is expected: its agents are "
                    "symmetric in up and down moves, and nothing in it plays the role of "
@@ -271,6 +272,28 @@ def compare(ticker="SPY", start="2015-01-01", end="2025-01-01", sim_steps=3000, 
                 "leverage_corr": simf["leverage_corr"], "histogram": histogram(sim_r)},
         "findings": _findings(real, simf, source),
     }
+
+
+def sim_seed_sweep(seeds=range(1, 11), steps=3000):
+    """How often does each fact pass across simulator seeds?
+
+    One seed is one sample: a test at 95% confidence on a truly uncorrelated
+    series still fails about 1 run in 13 (more than 2 of 20 lags poke out by
+    chance), so judge the simulator on the pass RATE, not on one run.
+    """
+    seeds = list(seeds)
+    passes = {f: 0 for f in FACT_NAMES}
+    lag1 = []
+    for sd in seeds:
+        sim = Simulation(seed=sd)
+        sim.run(int(steps))
+        fx = facts(np.diff(np.log(np.asarray(sim.history, float))))
+        lag1.append(fx["acf"][0])
+        for f in FACT_NAMES:
+            passes[f] += fx[f]["pass"]
+    return {"seeds": seeds, "steps": int(steps), "passes": passes,
+            "lag1_mean": float(np.mean(lag1)), "lag1_min": float(np.min(lag1)),
+            "lag1_max": float(np.max(lag1))}
 
 
 def from_capture(path):
@@ -390,6 +413,22 @@ def demo():
         assert cap["trades"] == 40
         assert cap["heavy_tails"]["excess_kurtosis"] > 0
 
+    # The simulator across seeds. Before the market-maker fix (see
+    # market_sim.MarketMaker.fair_value) no-autocorrelation failed 10/10 with
+    # lag-1 ACF about +0.35. These are properties of the MODEL, checked with
+    # the unchanged tests above.
+    t0 = time.perf_counter()
+    sw = sim_seed_sweep()
+    t_sw = time.perf_counter() - t0
+    p = sw["passes"]
+    assert sw["lag1_max"] < 0.1, f"simulator returns trend again: {sw}"
+    assert p["no_autocorrelation"] >= 7, f"no-autocorrelation fails too often: {sw}"
+    for f in ("heavy_tails", "volatility_clustering", "aggregational_gaussianity"):
+        assert p[f] >= 8, f"{f} lost: {sw}"
+
+    print(f"ok — simulator over seeds 1-10 ({t_sw:.1f}s): "
+          + ", ".join(f"{f} {p[f]}/10" for f in FACT_NAMES)
+          + f"; lag-1 ACF {sw['lag1_min']:+.3f}..{sw['lag1_max']:+.3f}")
     print(f"ok — GARCH passes tails/clustering, Gaussian noise fails them (5 seeds), "
           f"leverage detected, from_capture {cap['mid_changes']} mid changes")
     print(f"ok — compare() in {t_cmp:.2f}s, data_source={c['data_source']}")

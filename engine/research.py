@@ -311,6 +311,16 @@ def evaluate_orderflow(X, move, mid, horizon=10, folds=4, cost_bps=1.0, threshol
                 (the "I just follow the drift" baseline)
       zero      predict no move, never trade: AUC 0.5, IC 0, PnL exactly 0.
                 The baseline any real strategy must beat after costs.
+      continue  predict that the last `horizon` events' mid move continues.
+                Needs no model and no fitting. On the first real Kraken
+                capture (12 min of BTC/USD) it TIED the model out of sample
+                (IC 0.327 vs 0.329): the mid moves in half-ticks, one side of
+                the book requoting and then the other following, and 82% of
+                moves continue the previous one, so most "predictability" is
+                the second half of a step already under way. The model's
+                higher AUC comes from rows where the mid hadn't just moved.
+                A model that can't beat this has learned the book's
+                mechanics, not anything about value.
     Each with AUC (on non-zero moves), hit_rate (non-zero moves), ic (all rows),
     and cost-aware pnl (cost_bps per trade, holding for `horizon` events).
     Note: PnL rows overlap (a position per row, each held h events), so treat
@@ -333,6 +343,10 @@ def evaluate_orderflow(X, move, mid, horizon=10, folds=4, cost_bps=1.0, threshol
 
     idx = np.concatenate(idx)
     m, r = move[idx], rel[idx]
+    # Continuation baseline, from past mids only: mid[t] - mid[t - horizon].
+    past = np.zeros(len(mid))
+    past[horizon:] = mid[horizon:] - mid[:-horizon]
+    cont_p = np.where(past[idx] > 0, 1.0, np.where(past[idx] < 0, 0.0, 0.5))
     args = (m, r, cost_bps, threshold, horizon)
     return {
         "folds": len(model_p), "n_oos": len(idx),
@@ -340,6 +354,7 @@ def evaluate_orderflow(X, move, mid, horizon=10, folds=4, cost_bps=1.0, threshol
         "model": _direction_metrics(np.concatenate(model_p), *args),
         "majority": _direction_metrics(np.concatenate(major_p), *args),
         "zero": _direction_metrics(np.full(len(idx), 0.5), *args),
+        "continue": _direction_metrics(cont_p, *args),
     }
 
 
@@ -577,7 +592,7 @@ def _print_report(out):
           f"{of['n_oos']} out-of-sample rows, mid moved in {of['moved_frac']:.1%}")
     print(f"{'':10}{'AUC':>7}{'hit':>7}{'IC':>8}{'IC t':>7}{'trades':>8}"
           f"{'gross bp/trade':>16}{'net bp/trade':>14}")
-    for name in ("model", "majority", "zero"):
+    for name in ("model", "continue", "majority", "zero"):
         r = of[name]
         n = max(r["pnl"]["trades"], 1)
         print(f"{name:10}{r['auc']:7.3f}{r['hit_rate']:7.3f}{r['ic']:8.3f}"
@@ -585,6 +600,9 @@ def _print_report(out):
               f"{r['pnl']['gross'] * 1e4 / n:16.4f}{r['pnl']['net'] * 1e4 / n:14.4f}")
     print("|IC t| under ~2 is indistinguishable from noise. 'net' charges the "
           "cost per trade; real taker fees are far larger than 1 bp.")
+    if of["continue"]["ic"] >= of["model"]["ic"]:
+        print("NOTE: the no-model 'continue the last move' rule matches or beats the "
+              "model, so its skill is book mechanics (half-tick mid steps), not signal.")
     aucs = [f["auc"] for f in out["microprice_logit"]]
     if aucs:
         print("microprice-label logit, per-fold AUC: "

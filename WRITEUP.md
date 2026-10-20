@@ -210,6 +210,16 @@ The obvious suspect was the momentum traders, and removing them did fix the numb
 
 Fixing that exposed a second bug in the Avellaneda-Stoikov maker. Its inventory term was counted in shares, while the model counts inventory in lots (each fill moves it by one). With 10-share orders the skew was ten times too strong: quotes sat on their safety clamps, and the maker pushed the price against its own position, which showed up as -8 ticks of adverse selection five steps after its fills. Counted in lots, those markouts turn positive and the maker runs near break-even, holding about a third of the naive maker's inventory. The model had been right all along; the units weren't.
 
+## An AUC of 0.90 that's worth nothing
+
+The first real data came from twelve minutes of Kraken's BTC/USD order book: about 39,000 book updates, every one verified against the exchange's checksum. On it, the order-flow forecast predicted the direction of the mid price ten events ahead with an AUC of 0.90 and an information coefficient of 0.33, out of sample, t-stat 18.
+
+A number like that is a reason to look for a bug, so I tested the timing both ways. If the features were peeking at the future, giving them one more event of future information should help; it added nothing (0.897). If the signal were a last-instant tell, making the features stale should kill it; twenty events of delay only took it to 0.865. So it's real, and it's a slow-moving state of the book.
+
+Then the baseline that actually mattered. Not a coin flip, but the dumbest rule using the same information: "the last move continues". It tied the model on IC, 0.327 to 0.329. On this book, 82% of mid moves continue the previous one, because the mid moves in half-ticks: one side of the book requotes, then the other follows. Most of the "forecast" is the second half of a step that has already started. It's worth about 0.03 basis points per trade, against taker fees around 26.
+
+So the honest result is a highly accurate forecast with no economic value, and the lesson is about baselines. Beating a coin flip proves nothing when the market's own mechanics are predictable; the pipeline now prints the no-model rule beside every model.
+
 ## Twelve times faster, twice as fast
 
 The Rust engine matches orders 12.7x faster than the Python one, and the market simulation built on it got about 2x faster. Rather than guess why, I measured it two ways. cProfile is easy but charges a fixed cost to every Python call, which distorts exactly this kind of question. So the benchmark also records every call the simulation makes on the book, replays them in a bare loop, and times the Python side separately against a stand-in that answers each call from the recording and does no work. The two halves add up to the whole: the book is about 48% of a run.
@@ -236,4 +246,4 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 Move the simulator's agents into compiled code, since the measurement above says that's the only way past a ~1.9x end-to-end gain, and do it with the same discipline as the engine ports: a differential test that holds the Python agents as the oracle.
 
-After that, real data. The capture path for Kraken is built and checksum-verified against Kraken's own test vector; recording a few hours of BTC/USD and running the order-flow forecast and the stylized facts on it would show whether the forecast's skill in the simulator survives contact with a real book, and which missing mechanism (probably the leverage effect's asymmetry) the simulator should add next.
+After that, longer real recordings: a full day of BTC/USD across quiet and busy hours, the stylized facts run on real book returns next to the simulator's, and a forecast target that's actually tradeable (moves larger than the spread, net of fees) instead of the next tick.

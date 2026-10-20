@@ -32,7 +32,7 @@ cd ../cpp
 make test               # the C++ port (or see engine/cpp/README.md for MSVC)
 ```
 
-To record real order-book data: `python capture.py --live kraken BTC/USD 3600` from `engine/`, then `python research.py "data\kraken_BTCUSD_*.jsonl.gz"` to run the order-flow forecast on it.
+To record real order-book data: `python capture.py --live kraken BTC/USD 3600` from `engine/`, then `python research.py "data\kraken_BTCUSD_*.jsonl.gz"` to run the order-flow forecast on it. To build a time-of-day study automatically on Windows, run `install_schedule.ps1` once: it records an hour at four times a day, and `python study.py` tabulates what order flow adds in each session, with how many recordings back each number.
 
 To run the app on the Rust engine, build the Python extension once: inside `engine/rust`, run `python -m pip install .` (pip fetches maturin and compiles the Rust for you). Without it everything still works on the Python engine.
 

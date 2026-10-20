@@ -219,8 +219,81 @@ class FakeKraken:
             pass
 
 
+async def test_durability():
+    """The four ways a real recording died or could die, each now handled.
+
+    1. A socket that stays open but goes silent must be treated as dead and
+       reconnected (Kraken heartbeats every second, so silence means trouble).
+    2. Cancelling the recorder (what Ctrl+C does) must still close the file,
+       leaving a complete gzip stream.
+    3. A recording that's still running must be readable up to its last batch.
+    4. A recording cut off mid-write must replay up to the cut, not crash.
+    """
+    import os
+    import shutil
+    from replay import _records
+
+    connections = 0
+
+    async def silent(ws):                # accepts, then never says a word
+        nonlocal connections
+        connections += 1
+        await ws.wait_closed()           # until the client gives up on it
+
+    async with websockets.serve(silent, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        saved = capture.KRAKEN_WS_URL, capture.BACKOFF_BASE, capture.SILENCE_TIMEOUT
+        capture.KRAKEN_WS_URL = f"ws://127.0.0.1:{port}/v2"
+        capture.BACKOFF_BASE, capture.SILENCE_TIMEOUT = 0.05, 0.3
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                # 1. silence -> reconnect, logged as a disconnect
+                out = await capture.record_kraken(SYMBOL, seconds=1.6, outdir=d)
+                rows = [json.loads(l) for l in gzip.open(out, "rt")]
+                drops = [r for r in rows if r["type"] == "disconnect"]
+                assert connections >= 3 and drops and drops[0]["error"] == "ConnectionError", \
+                    (connections, drops)
+
+                # 2. cancel mid-recording (Ctrl+C) -> the file is still closed
+                task = asyncio.create_task(capture.record_kraken(SYMBOL, seconds=60, outdir=d))
+                await asyncio.sleep(0.8)
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                newest = max((os.path.join(d, f) for f in os.listdir(d)), key=os.path.getmtime)
+                with gzip.open(newest, "rt") as fh:
+                    fh.read()            # raises EOFError if the end marker is missing
+        finally:
+            capture.KRAKEN_WS_URL, capture.BACKOFF_BASE, capture.SILENCE_TIMEOUT = saved
+
+    with tempfile.TemporaryDirectory() as d:
+        # 3. readable while still open: each flushed batch is on disk
+        path, peek = os.path.join(d, "live.jsonl.gz"), os.path.join(d, "peek.jsonl.gz")
+        w = capture.Writer(path, batch=10)
+        for i in range(25):
+            w.write({"type": "trade", "i": i})
+        shutil.copy(path, peek)          # what a reader sees mid-recording
+        assert [r["i"] for r in _records(peek)] == list(range(20)), "flushed batches not on disk"
+        w.close()
+        assert [r["i"] for r in _records(path)] == list(range(25))
+
+        # 4. cut off mid-write: everything before the cut survives
+        with open(path, "rb") as fh:
+            data = fh.read()
+        with open(peek, "wb") as fh:
+            fh.write(data[: len(data) * 2 // 3])
+        got = [r["i"] for r in _records(peek)]
+        assert got == list(range(len(got))), "records after a cut must not be garbled"
+
+    print("ok — durability: silent feed reconnects, cancel closes the file, "
+          "open recordings are readable, cut-off recordings replay up to the cut")
+
+
 async def main():
     test_checksum_worked_example()
+    await test_durability()
 
     fake = FakeKraken()
     async with websockets.serve(fake.handler, "127.0.0.1", 0) as server:

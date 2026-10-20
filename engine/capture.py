@@ -140,6 +140,13 @@ class DepthStream:
         return min(self.asks, key=float) if self.asks else None
 
 
+# A live feed is never silent for long: Binance pushes depth every 100 ms and
+# Kraken v2 sends a heartbeat every second even when nothing trades. A socket
+# that stays open but stops delivering is dead in all but name, so after this
+# long with no message we treat it like a dropped connection and reconnect.
+SILENCE_TIMEOUT = 10.0
+
+
 class Writer:
     """Batched gzip JSONL. One file per run.
 
@@ -163,6 +170,13 @@ class Writer:
         if self.pending:
             self.fh.write("\n".join(self.pending) + "\n")
             self.pending.clear()
+            # Push the batch through gzip to disk with a sync point (the
+            # default mode of GzipFile.flush). Without it a crash or Ctrl+C
+            # loses everything still in gzip's buffer, and a reader can't see
+            # a recording that's still running. With it, the file is always
+            # readable up to the last batch (replay tolerates the missing end
+            # marker of a file that was never closed).
+            self.fh.flush()
 
     def close(self):
         self.flush()
@@ -203,46 +217,50 @@ async def record(symbol="BTCUSDT", seconds=60, outdir="data"):
     # Every reconnect re-snapshots. That is mandatory, not belt-and-braces: while
     # the socket was down the book kept moving, so the local copy is stale and
     # the next diff will not line up with it.
-    attempt = 0
-    while time.time() < deadline:
-        try:
-            async with websockets.connect(url) as ws:
-                attempt = 0
-                # Snapshot AFTER the socket is open, so nothing is missed between.
-                resnapshot("initial" if not stream.synced else "reconnect")
+    # try/finally: Ctrl+C, a closed window or a crash must still close the
+    # file. An unclosed gzip has no end marker and loses its last buffer.
+    try:
+        attempt = 0
+        while time.time() < deadline:
+            try:
+                async with websockets.connect(url) as ws:
+                    attempt = 0
+                    # Snapshot AFTER the socket is open, so nothing is missed between.
+                    resnapshot("initial" if not stream.synced else "reconnect")
 
-                while time.time() < deadline:
-                    msg = json.loads(await ws.recv())
-                    data = msg.get("data", msg)
+                    while time.time() < deadline:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=SILENCE_TIMEOUT)
+                        msg = json.loads(raw)
+                        data = msg.get("data", msg)
 
-                    if data.get("e") == "trade":
-                        writer.write({"type": "trade", "ts": time.time(),
-                                      "p": data["p"], "q": data["q"],
-                                      # True = buyer is the maker (sell aggressor)
-                                      "m": data["m"], "T": data["T"]})
-                        continue
+                        if data.get("e") == "trade":
+                            writer.write({"type": "trade", "ts": time.time(),
+                                          "p": data["p"], "q": data["q"],
+                                          # True = buyer is the maker (sell aggressor)
+                                          "m": data["m"], "T": data["T"]})
+                            continue
 
-                    status = stream.apply_event(data)
-                    writer.write({"type": "diff", "ts": time.time(),
-                                  "status": status, **data})
-                    if status == GAP:
-                        # Resync rather than keep a book we know is wrong.
-                        print("gap detected — resyncing")
-                        resnapshot("gap")
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:          # noqa: BLE001 - dropped socket, DNS, 5xx
-            if time.time() >= deadline:
-                break
-            attempt += 1
-            backoff = _backoff(attempt)
-            print(f"connection lost ({type(exc).__name__}) — "
-                  f"reconnecting in {backoff}s")
-            writer.write({"type": "disconnect", "ts": time.time(),
-                          "error": type(exc).__name__})
-            await asyncio.sleep(min(backoff, max(0.0, deadline - time.time())))
-
-    writer.close()
+                        status = stream.apply_event(data)
+                        writer.write({"type": "diff", "ts": time.time(),
+                                      "status": status, **data})
+                        if status == GAP:
+                            # Resync rather than keep a book we know is wrong.
+                            print("gap detected — resyncing")
+                            resnapshot("gap")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:          # noqa: BLE001 - dropped socket, DNS, 5xx
+                if time.time() >= deadline:
+                    break
+                attempt += 1
+                backoff = _backoff(attempt)
+                print(f"connection lost ({type(exc).__name__}) — "
+                      f"reconnecting in {backoff}s")
+                writer.write({"type": "disconnect", "ts": time.time(),
+                              "error": type(exc).__name__})
+                await asyncio.sleep(min(backoff, max(0.0, deadline - time.time())))
+    finally:
+        writer.close()
     print(f"{writer.count} messages, {stream.gaps} gaps, "
           f"book {stream.best_bid()} / {stream.best_ask()}")
     return out
@@ -544,49 +562,56 @@ async def record_kraken(symbol="BTC/USD", seconds=60, outdir="data", depth=10):
     # every new connection starts from a fresh snapshot because the book moved
     # while we were gone. On Kraken the snapshot arrives on the socket as the
     # first book message after subscribing, so there is no REST race.
-    attempt = 0
-    while time.time() < deadline:
-        try:
-            async with websockets.connect(KRAKEN_WS_URL) as ws:
-                attempt = 0
-                stream.reset("reconnect" if stream.snapshots else "initial")
-                await ws.send(req("subscribe", book_sub))
-                await ws.send(req("subscribe", trade_sub))
+    # try/finally: Ctrl+C, a closed window or a crash must still close the
+    # file. An unclosed gzip has no end marker and loses its last buffer.
+    try:
+        attempt = 0
+        while time.time() < deadline:
+            try:
+                async with websockets.connect(KRAKEN_WS_URL) as ws:
+                    attempt = 0
+                    stream.reset("reconnect" if stream.snapshots else "initial")
+                    await ws.send(req("subscribe", book_sub))
+                    await ws.send(req("subscribe", trade_sub))
 
-                while time.time() < deadline:
-                    try:
-                        raw = await asyncio.wait_for(
-                            ws.recv(), timeout=max(0.01, deadline - time.time()))
-                    except asyncio.TimeoutError:
-                        break
-                    # parse_float=Decimal: never let a price pass through float.
-                    msg = json.loads(raw, parse_float=Decimal)
-                    rows, resub = stream.handle(msg, time.time())
-                    for r in rows:
-                        writer.write(r)
-                        if r["type"] == "error":
-                            print(f"kraken error: {r['error']}")
-                    if resub:
-                        # Kraken's resync: drop the subscription and take it
-                        # again, which makes the server send a fresh snapshot.
-                        hint = (" (on a snapshot: check KRAKEN_PRECISION)"
-                                if rows and rows[-1].get("where") == "snapshot" else "")
-                        print(f"checksum mismatch, resubscribing{hint}")
-                        await ws.send(req("unsubscribe", book_sub))
-                        await ws.send(req("subscribe", book_sub))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:          # noqa: BLE001 - dropped socket, DNS, 5xx
-            if time.time() >= deadline:
-                break
-            attempt += 1
-            backoff = _backoff(attempt)
-            print(f"connection lost ({type(exc).__name__}), reconnecting in {backoff}s")
-            writer.write({"type": "disconnect", "ts": time.time(),
-                          "exchange": "kraken", "error": type(exc).__name__})
-            await asyncio.sleep(min(backoff, max(0.0, deadline - time.time())))
-
-    writer.close()
+                    while time.time() < deadline:
+                        left = deadline - time.time()
+                        try:
+                            raw = await asyncio.wait_for(
+                                ws.recv(), timeout=max(0.01, min(SILENCE_TIMEOUT, left)))
+                        except asyncio.TimeoutError:
+                            if time.time() >= deadline:
+                                break
+                            # Open but silent: no heartbeat for SILENCE_TIMEOUT.
+                            raise ConnectionError(f"feed silent for {SILENCE_TIMEOUT:.0f}s")
+                        # parse_float=Decimal: never let a price pass through float.
+                        msg = json.loads(raw, parse_float=Decimal)
+                        rows, resub = stream.handle(msg, time.time())
+                        for r in rows:
+                            writer.write(r)
+                            if r["type"] == "error":
+                                print(f"kraken error: {r['error']}")
+                        if resub:
+                            # Kraken's resync: drop the subscription and take it
+                            # again, which makes the server send a fresh snapshot.
+                            hint = (" (on a snapshot: check KRAKEN_PRECISION)"
+                                    if rows and rows[-1].get("where") == "snapshot" else "")
+                            print(f"checksum mismatch, resubscribing{hint}")
+                            await ws.send(req("unsubscribe", book_sub))
+                            await ws.send(req("subscribe", book_sub))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:          # noqa: BLE001 - dropped socket, DNS, 5xx
+                if time.time() >= deadline:
+                    break
+                attempt += 1
+                backoff = _backoff(attempt)
+                print(f"connection lost ({type(exc).__name__}), reconnecting in {backoff}s")
+                writer.write({"type": "disconnect", "ts": time.time(),
+                              "exchange": "kraken", "error": type(exc).__name__})
+                await asyncio.sleep(min(backoff, max(0.0, deadline - time.time())))
+    finally:
+        writer.close()
     print(f"{writer.count} records, {stream.verified} checksums verified, "
           f"{stream.mismatches} mismatches, {stream.trades} trades, "
           f"book {stream.best_bid()} / {stream.best_ask()}")

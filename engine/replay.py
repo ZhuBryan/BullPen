@@ -24,6 +24,8 @@ Run `python replay.py` for the self-check (no network, synthetic data).
 
 import gzip
 import json
+import sys
+import zlib
 
 try:                                  # importable as a package or run directly
     from engine.capture import DepthStream
@@ -36,6 +38,31 @@ BUY, SELL = "B", "S"
 # ---------------------------------------------------------------------------
 # Reading a capture file back into book states
 # ---------------------------------------------------------------------------
+def _records(path):
+    """Parsed records from a capture file, tolerating a cut-off tail.
+
+    A recorder stopped without closing its file (Ctrl+C before the fix, a
+    closed window, a crash, a power cut) leaves a gzip stream with no end
+    marker and maybe half a line. Everything before the cut is still good
+    data, so read up to it and say how much was recovered rather than throw
+    the whole recording away.
+    """
+    n = 0
+    try:
+        with gzip.open(path, "rt") as fh:
+            for line in fh:
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    break                    # half-written last line
+                n += 1
+                yield msg
+    except (EOFError, zlib.error, gzip.BadGzipFile) as e:
+        print(f"note: {path} was cut off without being closed "
+              f"({type(e).__name__}); using the {n:,} complete records before the cut",
+              file=sys.stderr)
+
+
 def replay(path):
     """Yield (kind, payload, book) for each recorded message, in order.
 
@@ -43,19 +70,17 @@ def replay(path):
     live DepthStream, so callers see the state as of that moment.
     """
     stream = DepthStream()
-    with gzip.open(path, "rt") as fh:
-        for line in fh:
-            msg = json.loads(line)
-            kind = msg.get("type")
+    for msg in _records(path):
+        kind = msg.get("type")
 
-            if kind == "snapshot":
-                stream.apply_snapshot(msg)
+        if kind == "snapshot":
+            stream.apply_snapshot(msg)
+            yield "book", msg, stream
+        elif kind == "diff":
+            if stream.apply_event(msg) == "applied":
                 yield "book", msg, stream
-            elif kind == "diff":
-                if stream.apply_event(msg) == "applied":
-                    yield "book", msg, stream
-            elif kind == "trade":
-                yield "trade", msg, stream
+        elif kind == "trade":
+            yield "trade", msg, stream
 
 
 # ---------------------------------------------------------------------------

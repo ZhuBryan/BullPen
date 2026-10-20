@@ -314,7 +314,8 @@ def evaluate_orderflow(X, move, mid, horizon=10, folds=4, cost_bps=1.0, threshol
       continue  predict that the last `horizon` events' mid move continues.
                 Needs no model and no fitting. On the first real Kraken
                 capture (12 min of BTC/USD) it TIED the model out of sample
-                (IC 0.327 vs 0.329): the mid moves in half-ticks, one side of
+                (IC 0.327 vs 0.329); over a full hour the model pulled ahead
+                (0.333 vs 0.270), so it learns a little beyond this rule: the mid moves in half-ticks, one side of
                 the book requoting and then the other following, and 82% of
                 moves continue the previous one, so most "predictability" is
                 the second half of a step already under way. The model's

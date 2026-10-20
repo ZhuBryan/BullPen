@@ -212,11 +212,11 @@ Fixing that exposed a second bug in the Avellaneda-Stoikov maker. Its inventory 
 
 ## An AUC of 0.90 that's worth nothing
 
-The first real data came from twelve minutes of Kraken's BTC/USD order book: about 39,000 book updates, every one verified against the exchange's checksum. On it, the order-flow forecast predicted the direction of the mid price ten events ahead with an AUC of 0.90 and an information coefficient of 0.33, out of sample, t-stat 18.
+The first real data came from Kraken's BTC/USD order book: twelve minutes at first, then a full hour of about 65,000 book updates, every one verified against the exchange's checksum. On the first sample, the order-flow forecast predicted the direction of the mid price ten events ahead with an AUC of 0.90 and an information coefficient of 0.33, out of sample, t-stat 18.
 
 A number like that is a reason to look for a bug, so I tested the timing both ways. If the features were peeking at the future, giving them one more event of future information should help; it added nothing (0.897). If the signal were a last-instant tell, making the features stale should kill it; twenty events of delay only took it to 0.865. So it's real, and it's a slow-moving state of the book.
 
-Then the baseline that actually mattered. Not a coin flip, but the dumbest rule using the same information: "the last move continues". It tied the model on IC, 0.327 to 0.329. On this book, 82% of mid moves continue the previous one, because the mid moves in half-ticks: one side of the book requotes, then the other follows. Most of the "forecast" is the second half of a step that has already started. It's worth about 0.03 basis points per trade, against taker fees around 26.
+Then the baseline that actually mattered. Not a coin flip, but the dumbest rule using the same information: "the last move continues". It tied the model on IC, 0.327 to 0.329. Over the full hour the model pulled modestly ahead (0.33 to 0.27, AUC 0.92), so it does learn something beyond this rule, but the shape of the answer didn't change. On this book, 82% of mid moves continue the previous one, because the mid moves in half-ticks: one side of the book requotes, then the other follows. Most of the "forecast" is the second half of a step that has already started. It's worth about 0.03 basis points per trade, against taker fees around 26.
 
 So the honest result is a highly accurate forecast with no economic value, and the lesson is about baselines. Beating a coin flip proves nothing when the market's own mechanics are predictable; the pipeline now prints the no-model rule beside every model.
 

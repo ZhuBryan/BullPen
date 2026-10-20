@@ -120,22 +120,35 @@ class Logit:
     """ponytail: plain gradient descent. Swap for sklearn when you need
     calibration, class weights, or anything beyond a baseline."""
 
-    def __init__(self, lr=0.5, epochs=400, l2=1e-3):
-        self.lr, self.epochs, self.l2 = lr, epochs, l2
+    def __init__(self, lr=0.5, epochs=400, l2=1e-3, intercept=True):
+        self.lr, self.epochs, self.l2, self.intercept = lr, epochs, l2, intercept
+
+    def _design(self, X):
+        if not self.intercept:
+            # Symmetric model: features are scaled but NOT recentred and there
+            # is no constant, so "no flow, no recent move" is pinned at
+            # P(up) = 0.5. An intercept would learn the training window's
+            # drift, which doesn't persist (the majority baseline's IC is
+            # negative on real data); each fold then shifts all its
+            # predictions by a different amount, and pooling the folds
+            # scrambles the ranking. That cost a sign-of-last-move model
+            # 0.13-0.19 of IC on real Kraken data.
+            return X / self.sd
+        return np.c_[np.ones(len(X)), (X - self.mu) / self.sd]
 
     def fit(self, X, y):
         self.mu, self.sd = X.mean(0), X.std(0) + 1e-12
-        Z = np.c_[np.ones(len(X)), (X - self.mu) / self.sd]
+        Z = self._design(X)
         self.w = np.zeros(Z.shape[1])
         for _ in range(self.epochs):
             p = 1 / (1 + np.exp(-Z @ self.w))
-            grad = Z.T @ (p - y) / len(y) + self.l2 * np.r_[0, self.w[1:]]
+            reg = np.r_[0, self.w[1:]] if self.intercept else self.w
+            grad = Z.T @ (p - y) / len(y) + self.l2 * reg
             self.w -= self.lr * grad
         return self
 
     def predict_proba(self, X):
-        Z = np.c_[np.ones(len(X)), (X - self.mu) / self.sd]
-        return 1 / (1 + np.exp(-Z @ self.w))
+        return 1 / (1 + np.exp(-self._design(X) @ self.w))
 
 
 # ---------------------------------------------------------------------------
@@ -241,18 +254,25 @@ def evaluate(X, y, mid, horizon=20, folds=4, cost_bps=1.0):
 # seconds; event time is the natural clock of an order book). Most of the
 # time the mid does not move at all, so the model is trained and scored on the
 # non-zero moves, while IC and PnL are measured on every row.
-OF_FEATURES = ["ofi_window", "imbalance_1", "spread"]
+# Every feature flips sign when the book is mirrored (bids <-> asks), as a
+# predictor of DIRECTION must. Spread doesn't (it's always positive), so in a
+# no-intercept model it would sneak the intercept back in; it was dropped and
+# made no difference to out-of-sample IC on real data. past_move_sign makes
+# the model contain the no-model "continue" baseline, so the question it
+# answers is the useful one: does order flow add anything BEYOND the price path?
+OF_FEATURES = ["ofi_window", "imbalance_1", "past_move_sign"]
 
 
 def orderflow_dataset(path, horizon=10, window=10):
     """Capture file -> (X, move, mid). Row t uses only book states up to t.
 
-    X[t]    = [ofi over events t-window+1..t, imbalance_1 at t, spread at t]
+    X[t]    = [ofi over events t-window+1..t, imbalance_1 at t,
+               sign of mid[t] - mid[t - horizon] (0 for the first rows)]
     move[t] = mid[t + horizon] - mid[t]   (the label looks forward; X never does)
     mid[t]  = mid at t, for converting moves to returns
     Works on Binance and Kraken captures alike (same record format).
     """
-    flows, imb, spread, mids = [], [], [], []
+    flows, imb, mids = [], [], []
     prev = None
     for kind, msg, book in replay(path):
         if kind != "book":
@@ -266,7 +286,6 @@ def orderflow_dataset(path, horizon=10, window=10):
         flows.append(ofi(prev, bp) if prev is not None else 0.0)
         prev = bp
         imb.append((bq - aq) / (bq + aq))
-        spread.append(a - b)
         mids.append((a + b) / 2)
 
     mid = np.asarray(mids, float)
@@ -274,7 +293,9 @@ def orderflow_dataset(path, horizon=10, window=10):
         return np.zeros((0, len(OF_FEATURES))), np.zeros(0), np.zeros(0)
     c = np.cumsum(flows)
     lagged = np.r_[np.zeros(window), c][:len(c)]          # c[t - window], or 0
-    X = np.column_stack([c - lagged, imb, spread])
+    past = np.zeros(len(mid))
+    past[horizon:] = mid[horizon:] - mid[:-horizon]          # known at t
+    X = np.column_stack([c - lagged, imb, np.sign(past)])
     move = mid[horizon:] - mid[:-horizon]
     return X[:-horizon], move, mid[:-horizon]
 
@@ -335,7 +356,7 @@ def evaluate_orderflow(X, move, mid, horizon=10, folds=4, cost_bps=1.0, threshol
         ups = (move[moved] > 0).astype(int)
         if len(moved) < 50 or len(np.unique(ups)) < 2:
             continue
-        model = Logit().fit(X[moved], ups)
+        model = Logit(intercept=False).fit(X[moved], ups)
         idx.append(test)
         model_p.append(model.predict_proba(X[test]))
         major_p.append(np.full(len(test), 1.0 if ups.mean() >= 0.5 else 0.0))
@@ -601,9 +622,11 @@ def _print_report(out):
               f"{r['pnl']['gross'] * 1e4 / n:16.4f}{r['pnl']['net'] * 1e4 / n:14.4f}")
     print("|IC t| under ~2 is indistinguishable from noise. 'net' charges the "
           "cost per trade; real taker fees are far larger than 1 bp.")
-    if of["continue"]["ic"] >= of["model"]["ic"]:
-        print("NOTE: the no-model 'continue the last move' rule matches or beats the "
-              "model, so its skill is book mechanics (half-tick mid steps), not signal.")
+    # The model contains the continue rule (past_move_sign is a feature), so
+    # the gap between them is what order flow adds beyond the price path.
+    extra = of["model"]["ic"] - of["continue"]["ic"]
+    print(f"order flow adds {extra:+.3f} IC beyond the no-model 'continue the last move' rule"
+          + (" (none: the skill is book mechanics, half-tick mid steps)" if extra <= 0.01 else ""))
     aucs = [f["auc"] for f in out["microprice_logit"]]
     if aucs:
         print("microprice-label logit, per-fold AUC: "

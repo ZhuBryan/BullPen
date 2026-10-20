@@ -380,6 +380,98 @@ def evaluate_orderflow(X, move, mid, horizon=10, folds=4, cost_bps=1.0, threshol
     }
 
 
+# ---------------------------------------------------------------------------
+# Could ANY forecast be traded? The perfect-foresight bound
+# ---------------------------------------------------------------------------
+# Kraken Pro spot fees, from kraken.com/features/fee-schedule (checked
+# 2026-10-20), in basis points per side: (maker, taker).
+FEE_TIERS = {"new account": (40, 80), "$10M/month": (0, 10), "Pro 5 ($500M+)": (0, 5)}
+TRADE_HORIZONS = (1, 10, 60, 300, 900)       # seconds
+
+
+def timed_book(path):
+    """-> (ts, mid, spread) per book event, the same events orderflow_dataset uses."""
+    ts, mid, spread = [], [], []
+    for kind, msg, book in replay(path):
+        if kind != "book":
+            continue
+        bp = best_pair(book)
+        if bp is None:
+            continue
+        (b, _), (a, _) = bp
+        ts.append(msg.get("ts", 0.0))
+        mid.append((a + b) / 2)
+        spread.append(a - b)
+    return np.asarray(ts, float), np.asarray(mid, float), np.asarray(spread, float)
+
+
+def tradeable(path, horizons=TRADE_HORIZONS, tiers=FEE_TIERS, window=10):
+    """For each holding horizon H (seconds): could perfect foresight pay its costs,
+    and how much of the move can the order-flow model actually call?
+
+    The oracle knows exactly where the mid will be H seconds later, buys or
+    sells accordingly, and closes after H seconds. Its gross gain is |move|.
+    A TAKER pays the spread (half on the way in, half on the way out) plus two
+    taker fees. A MAKER is credited the spread and pays two maker fees, which
+    assumes both its orders fill with no adverse selection, so that line is an
+    upper bound, not a forecast. If the oracle loses at a horizon, no model
+    can win there; that's the point of computing it first.
+    """
+    Xall, _, _ = orderflow_dataset(path, horizon=10, window=window)
+    ts, mid, spread = timed_book(path)
+    n = len(Xall)                      # orderflow_dataset drops the last 10 events
+    ts, mid, spread = ts[:n], mid[:n], spread[:n]
+    spread_bp = spread / mid * 1e4
+    out = []
+    for H in horizons:
+        j = np.searchsorted(ts, ts + H, side="right") - 1     # last event within H
+        ok = ts + H <= ts[-1]
+        if ok.sum() < 500:
+            continue
+        move = mid[j] - mid
+        gross_bp = np.abs(move) / mid * 1e4
+        row = {"horizon_s": H, "n": int(ok.sum()),
+               "median_move_bp": round(float(np.median(gross_bp[ok])), 3),
+               "median_spread_bp": round(float(np.median(spread_bp[ok])), 3)}
+        for name, (maker, taker) in tiers.items():
+            taker_net = gross_bp - spread_bp - 2 * taker
+            maker_net = gross_bp + spread_bp - 2 * maker
+            row[f"oracle_taker {name}"] = round(float(taker_net[ok].mean()), 2)
+            row[f"oracle_maker_bound {name}"] = round(float(maker_net[ok].mean()), 2)
+            row[f"taker_profitable_pct {name}"] = round(float((taker_net[ok] > 0).mean() * 100), 1)
+        # The real model at this horizon, with a purge gap wide enough to cover
+        # H seconds of overlapping labels, charged the best tier's taker costs.
+        gap = int((j - np.arange(n))[ok].max())
+        best_taker = min(t for _, t in tiers.values())
+        cost = float(np.median(spread_bp[ok])) + 2 * best_taker
+        res = evaluate_orderflow(Xall[ok], move[ok], mid[ok], horizon=max(gap, 1),
+                                 cost_bps=cost)
+        if res.get("folds"):
+            m = res["model"]
+            trades = max(m["pnl"]["trades"], 1)
+            row.update({"model_ic": round(m["ic"], 3), "model_auc": round(m["auc"], 3),
+                        "model_net_bp_best_tier": round(m["pnl"]["net"] * 1e4 / trades, 2),
+                        "model_trades": m["pnl"]["trades"]})
+        out.append(row)
+    return out
+
+
+def _print_tradeable(rows, tiers=FEE_TIERS):
+    names = list(tiers)
+    print()
+    print("could ANY forecast pay its costs? perfect foresight, mean net bp per round trip")
+    print(f"{'hold':>6}{'|move|':>8}{'spread':>8}" + "".join(f"{'taker ' + n[:14]:>22}" for n in names)
+          + f"{'maker bound ' + names[-1][:5]:>18}{'model IC':>10}{'model net':>11}")
+    for r in rows:
+        print(f"{r['horizon_s']:>5}s{r['median_move_bp']:8.2f}{r['median_spread_bp']:8.2f}"
+              + "".join(f"{r['oracle_taker ' + n]:22.2f}" for n in names)
+              + f"{r['oracle_maker_bound ' + names[-1]]:18.2f}"
+              + (f"{r['model_ic']:10.3f}{r['model_net_bp_best_tier']:11.2f}" if "model_ic" in r else ""))
+    print("bp = basis points of price (1 bp = 0.01%). Taker pays the spread and two taker fees; "
+          "the maker bound assumes free, perfectly timed fills, so it is a ceiling. "
+          "'model net' is the order-flow model trading at the best tier's taker cost.")
+
+
 def run(path, horizon=10, window=10, folds=4, cost_bps=1.0):
     """Everything on one capture file (Binance or Kraken). JSON-ready dict."""
     X, y, mid = build_dataset(path, horizon)
@@ -649,5 +741,6 @@ if __name__ == "__main__":
         cost = float(sys.argv[3]) if len(sys.argv) > 3 else 1.0
         print(f"capture: {matches[-1]}")
         _print_report(run(matches[-1], horizon=hz, cost_bps=cost))
+        _print_tradeable(tradeable(matches[-1]))
     else:
         demo()

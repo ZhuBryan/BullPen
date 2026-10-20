@@ -42,8 +42,8 @@ jobs:
       TZ: America/Toronto
       RECORD_SECONDS: ${{ github.event.inputs.seconds || '3600' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - run: pip install numpy websockets
@@ -61,7 +61,7 @@ jobs:
 
       - name: Keep the raw recordings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: recordings-${{ github.run_id }}
           path: engine/data/*.jsonl.gz

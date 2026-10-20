@@ -1,0 +1,99 @@
+name: Record market data
+
+# Four times a day, on GitHub's servers (so no laptop has to stay on):
+#   * one hour of Kraken's BTC/USD order book, checksum-verified (capture.py)
+#   * the same hour of Kraken + Coinbase best bid/offer, for lead-lag (leadlag.py)
+# then the analyses run and their results are appended to the `data` branch:
+#   study.csv           what order flow adds beyond the price path, per recording
+#   leadlag_study.csv   which venue moved first, per recording
+#   latest_report.txt   the full research report on the newest recording
+# Raw recordings are kept as workflow artifacts for 30 days.
+#
+# GitHub disables scheduled workflows after 60 days without commits to the
+# repository; push anything (or run this by hand) to re-enable it.
+
+on:
+  schedule:
+    # Times are UTC; in Toronto time (EDT) these are 03:00, 09:30, 14:00 and
+    # 21:00, one per session of the day. Recordings are stamped in Toronto
+    # time (TZ below), so study.py's sessions stay right across the DST change.
+    - cron: "0 7 * * *"
+    - cron: "30 13 * * *"
+    - cron: "0 18 * * *"
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Recording length in seconds"
+        default: "3600"
+
+permissions:
+  contents: write            # to push results to the data branch
+
+concurrency:
+  group: record-market-data  # never two recordings pushing at once
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      TZ: America/Toronto
+      RECORD_SECONDS: ${{ github.event.inputs.seconds || '3600' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy websockets
+
+      - name: Record the order book and both venues' quotes, at the same time
+        working-directory: engine
+        run: |
+          python capture.py --live kraken BTC/USD "$RECORD_SECONDS" &
+          book=$!
+          python leadlag.py --live "$RECORD_SECONDS" &
+          quotes=$!
+          # wait on each pid so a crashed recorder fails the step
+          wait "$book"
+          wait "$quotes"
+
+      - name: Keep the raw recordings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recordings-${{ github.run_id }}
+          path: engine/data/*.jsonl.gz
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Check out previous results (the data branch)
+        run: |
+          if git fetch origin data:data 2>/dev/null; then
+            git worktree add results data
+          else
+            # first run: start an empty branch with no code on it
+            git worktree add --detach results
+            (cd results && git checkout --orphan data && git rm -rfq . || true)
+          fi
+          mkdir -p engine/data
+          cp results/study.csv engine/data/ 2>/dev/null || true
+          cp results/leadlag_study.csv engine/data/ 2>/dev/null || true
+
+      - name: Analyse
+        working-directory: engine
+        run: |
+          python study.py
+          python leadlag.py "data/leadlag_*.jsonl.gz"
+          python research.py "data/kraken_BTCUSD_*.jsonl.gz" | tee data/latest_report.txt
+
+      - name: Save results to the data branch
+        run: |
+          cp engine/data/study.csv engine/data/leadlag_study.csv engine/data/latest_report.txt results/
+          cd results
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add study.csv leadlag_study.csv latest_report.txt
+          git commit -qm "data: recording at $(date '+%Y-%m-%d %H:%M %Z')" || echo "nothing new to commit"
+          git push origin data

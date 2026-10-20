@@ -13,6 +13,7 @@ name: CI
 
 on:
   push:
+    branches-ignore: [data]   # the data branch holds recording results, not code
   pull_request:
   workflow_dispatch:
 

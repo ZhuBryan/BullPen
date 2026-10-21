@@ -1,2 +1,3 @@
 file,bytes,start,weekday,hour,events,moved_pct,model_auc,model_ic,model_ic_t,continue_ic,adds,gross_bp
 kraken_BTCUSD_20261020_171609.jsonl.gz,439663,2026-10-20T17:16,Tue,17,15994,11.2,0.829,0.219,7.8,0.343,-0.123,0.0202
+kraken_BTCUSD_20261021_014800.jsonl.gz,3808002,2026-10-21T01:48,Wed,1,137705,7.7,0.951,0.329,34.5,0.316,0.012,0.0193

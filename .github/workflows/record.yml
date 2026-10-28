@@ -1,6 +1,6 @@
 name: Record market data
 
-# Four times a day, on GitHub's servers (so no laptop has to stay on):
+# Every three hours, on GitHub's servers (so no laptop has to stay on):
 #   * one hour of Kraken's BTC/USD order book, checksum-verified (capture.py)
 #   * the same hour of Kraken + Coinbase best bid/offer, for lead-lag (leadlag.py)
 # then the analyses run and their results are appended to the `data` branch:
@@ -14,13 +14,12 @@ name: Record market data
 
 on:
   schedule:
-    # Times are UTC; in Toronto time (EDT) these are 03:00, 09:30, 14:00 and
-    # 21:00, one per session of the day. Recordings are stamped in Toronto
-    # time (TZ below), so study.py's sessions stay right across the DST change.
-    - cron: "0 7 * * *"
-    - cron: "30 13 * * *"
-    - cron: "0 18 * * *"
-    - cron: "0 1 * * *"
+    # Every 3 hours, at :17 rather than on the hour (GitHub delays jobs most
+    # at the top of the hour). In the first week GitHub started every run 3-6
+    # hours late, so four fixed times never once landed in the evening; eight
+    # a day cover every session however late they run. Each run is stamped
+    # with its real start time in Toronto (TZ below), which study.py uses.
+    - cron: "17 */3 * * *"
   workflow_dispatch:
     inputs:
       seconds:

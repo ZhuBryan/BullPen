@@ -220,13 +220,30 @@ Then the baseline that actually mattered. Not a coin flip, but the dumbest rule 
 
 A third recording, a busy midday hour with six times the activity, flipped the order: the no-model rule beat the model outright. That exposed two problems with the model rather than the market. It had never been given the recent price move, so it couldn't contain the rule it was being compared with. And its logistic regression had an intercept, which learned each training window's drift; drift doesn't persist, so every walk-forward fold shifted its predictions by a different amount and pooling them scrambled the ranking. With the last move added as a feature and the intercept removed, a model holding only the sign of the last move matches the rule exactly, as it must, and the comparison finally asks the useful question: what does order flow add beyond the price path? Overnight, about 0.08 of IC. In the busy hour, nothing.
 
-So the honest result is a highly accurate forecast with no economic value, whose genuine order-flow component appears only in quiet markets, and the lesson is about baselines. Beating a coin flip proves nothing when the market's own mechanics are predictable; the pipeline now prints the no-model rule beside every model.
+So the honest result is a highly accurate forecast with no economic value, with a small genuine order-flow component on top of the book's mechanics, and the lesson is about baselines. Beating a coin flip proves nothing when the market's own mechanics are predictable; the pipeline now prints the no-model rule beside every model.
 
 ## Could any forecast be traded?
 
 That raised the obvious follow-up: forget this model, could *any* forecast make money here? There's a clean way to answer it without building a better model: give a hypothetical trader perfect foresight of where the mid will be H seconds later, charge it the real spread and Kraken's published fees, and see whether it profits. If perfect knowledge of the future loses at some horizon, no model can win there.
 
 At a new account's fees (0.80% per taker trade, so 160 bp a round trip), perfect foresight loses about 150 bp per trade at every horizon from one second to fifteen minutes; Bitcoin rarely moves that much in a quarter of an hour. At the very best tier, an account trading over $500M a month, perfect foresight breaks even only on holds of five minutes or more, and only in the busy hour. Meanwhile the forecast's skill decays with the horizon: an IC around 0.5 at one second, where nothing can be profitable, falling to about 0.1 by five minutes, where perfect foresight barely clears the fees. The curves never cross. The only line that stays positive is the market maker's, which earns the spread rather than paying it, and that, quantitatively, is why high-frequency firms make markets instead of betting on direction.
+
+## A week of data
+
+Three recordings had suggested a story: order flow adds information beyond the price path in a quiet overnight market (+0.08 IC) and none in a busy one (-0.005). Three recordings make an anecdote, so a scheduled job recorded an hour four times a day for a week, on GitHub's servers, and ran the same analysis on each.
+
+| Part of the day (Toronto) | Hours recorded | Mean book updates | Order flow adds (IC) | Range |
+|---|---|---|---|---|
+| Night, 00-06 | 7 | 118,000 | +0.001 | -0.064 to +0.042 |
+| Morning, 06-12 | 7 | 220,000 | +0.045 | +0.010 to +0.124 |
+| Afternoon, 12-18 | 14 | 129,000 | +0.029 | -0.009 to +0.095 |
+| All 28 hours | 28 | 149,000 | **+0.026** | 95% interval +0.013 to +0.040 |
+
+The headline holds and got sharper: order flow does carry information beyond the recent price move, positive in 23 of 28 hours. The story didn't. Across the 28 hours, how busy the book was had essentially no relationship with how much order flow added (rank correlation -0.06, p = 0.74 by permutation), and the busiest hour of the week added +0.049. If anything the night session, where the story said order flow mattered most, came out lowest. The one variable that did line up was how often the mid actually moved (rank correlation +0.54, p = 0.004), which is worth testing properly but was one of several things I looked at, so I'm treating it as a lead rather than a finding. None of this changes the economics: the edge was 0.015 to 0.033 basis points per trade in every hour.
+
+The same week answered the lead-lag question. If one exchange's price consistently moved first, the cross-correlation of the two venues' returns would peak at the same nonzero lag hour after hour. It didn't: Coinbase came first in 12 hours, Kraken in 8, and 8 peaked at zero, with a median lag of 0 ms and nothing beyond 150 ms (a sign test on the 20 decided hours gives p = 0.5). The 250 ms Kraken lead from a five-minute test run was noise. Measured from a datacenter at 50 ms resolution, Bitcoin's two big North American venues move together; any lead lives below that resolution or inside the network.
+
+A practical lesson came free: GitHub ran every scheduled job three to six hours late, so the evening was never recorded. The schedule now runs every three hours, so coverage no longer depends on when GitHub gets round to it.
 
 ## Twelve times faster, twice as fast
 
@@ -254,4 +271,4 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 Move the simulator's agents into compiled code, since the measurement above says that's the only way past a ~1.9x end-to-end gain, and do it with the same discipline as the engine ports: a differential test that holds the Python agents as the oracle.
 
-After that, longer real recordings: a full day of BTC/USD across quiet and busy hours, the stylized facts run on real book returns next to the simulator's, and a forecast target that's actually tradeable (moves larger than the spread, net of fees) instead of the next tick.
+After that, the one lead the week of data turned up: whether order flow's extra information tracks how often the price moves, tested on fresh recordings rather than the ones that suggested it, and the stylized facts run on real book returns next to the simulator's.

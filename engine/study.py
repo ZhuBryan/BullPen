@@ -30,9 +30,11 @@ import time
 from datetime import datetime
 
 try:
-    from engine.research import evaluate_orderflow, orderflow_dataset
+    from engine.research import _ranks, evaluate_orderflow, orderflow_dataset
 except ImportError:
-    from research import evaluate_orderflow, orderflow_dataset
+    from research import _ranks, evaluate_orderflow, orderflow_dataset
+
+import numpy as np
 
 FIELDS = ["file", "bytes", "start", "weekday", "hour", "events", "moved_pct",
           "model_auc", "model_ic", "model_ic_t", "continue_ic", "adds", "gross_bp"]
@@ -105,6 +107,45 @@ def update(data_dir="data", refresh=False, quiet=False):
     return sorted(rows.values(), key=lambda r: r["start"])
 
 
+# ---------------------------------------------------------------------------
+# Pre-registered test (written 2026-10-30, before any of its data existed)
+# ---------------------------------------------------------------------------
+# The first week (28 recordings, 2026-10-21 to 10-27) suggested that order
+# flow adds more in hours where the mid moves more often (rank correlation
+# +0.54, p = 0.004). That came from looking at the data, among several
+# comparisons, so the same data can't confirm it. This is the confirmation,
+# fixed before the data exists:
+#
+#   On the FIRST 24 one-hour recordings that start after PREREG_CUTOFF, the
+#   rank correlation between moved_pct and adds is positive, with a one-sided
+#   permutation p-value below 0.05.
+#
+# The sample size is fixed in advance: checking the p-value as data arrives
+# and stopping when it looks good would make the test meaningless.
+PREREG_CUTOFF = "2026-10-30T13:30"       # Toronto time; recordings start after this
+PREREG_N = 24                            # three days at eight recordings a day
+PREREG_MIN_EVENTS = 50_000               # hour-long recordings have 75k+; skips test runs
+
+
+def preregistered(rows, n_perm=20_000, seed=0):
+    """Score the pre-registered prediction. 'pending' until PREREG_N recordings exist."""
+    fresh = [r for r in rows
+             if r["start"] > PREREG_CUTOFF and int(r["events"]) >= PREREG_MIN_EVENTS][:PREREG_N]
+    out = {"n": len(fresh), "needed": PREREG_N, "verdict": "pending"}
+    if len(fresh) < PREREG_N:
+        return out
+    x = _ranks([float(r["moved_pct"]) for r in fresh])
+    y = _ranks([float(r["adds"]) for r in fresh])
+    rho = float(np.corrcoef(x, y)[0, 1])
+    rng = np.random.default_rng(seed)
+    null = np.array([np.corrcoef(x, rng.permutation(y))[0, 1] for _ in range(n_perm)])
+    p = float((null >= rho).mean())                     # one-sided: predicted positive
+    out.update(rho=round(rho, 3), p=round(p, 4),
+               first=fresh[0]["start"], last=fresh[-1]["start"],
+               verdict="confirmed" if rho > 0 and p < 0.05 else "not confirmed")
+    return out
+
+
 def report(rows):
     if not rows:
         print("no recordings yet: run capture.py (or the scheduled task) first")
@@ -134,6 +175,15 @@ def report(rows):
     print("'adds' = model IC minus the no-model 'continue the last move' rule's IC: what "
           "order flow tells you beyond the price path. 'gross bp' is before any fee.")
 
+    t = preregistered(rows)
+    print(f"\npre-registered test (2026-10-30): on the first {t['needed']} recordings after "
+          f"{PREREG_CUTOFF}, does order flow add more in hours where the mid moves more often?")
+    if t["verdict"] == "pending":
+        print(f"  pending: {t['n']} of {t['needed']} recordings so far")
+    else:
+        print(f"  {t['verdict'].upper()}: rank correlation {t['rho']:+.3f}, one-sided p {t['p']:.4f} "
+              f"({t['first']} to {t['last']})")
+
 
 def demo():
     """Self-check on two synthetic recordings: analyse, cache, re-use the cache."""
@@ -155,7 +205,27 @@ def demo():
         assert os.path.exists(os.path.join(d, "study.csv"))
         cached = update(d, quiet=True)          # nothing new: served from the cache
         assert [r["file"] for r in cached] == [r["file"] for r in rows]
-    print("ok — study: analyses recordings, caches results, groups by session")
+    # Pre-registered test: a planted relationship is confirmed, its shuffle
+    # isn't, too few recordings stay pending, and recordings from before the
+    # cutoff or shorter than an hour are never counted.
+    rng = np.random.default_rng(5)
+    moved = rng.uniform(8, 24, 30)
+
+    def fake(i, adds_val, start=None, events=120_000):
+        return {"start": start or f"2026-11-0{1 + i // 8}T{(i % 8) * 3:02d}:17", "events": events,
+                "moved_pct": moved[i], "adds": adds_val}
+    planted = [fake(i, 0.004 * moved[i] + rng.normal(0, 0.01)) for i in range(30)]
+    early = [fake(i, -1.0, start="2026-10-25T08:00") for i in range(10)]   # before cutoff
+    short = [fake(i, -1.0, events=10_000) for i in range(5)]               # test runs
+    t = preregistered(early + short + planted)
+    assert t["verdict"] == "confirmed" and t["n"] == PREREG_N, t
+    shuffled = [dict(r, adds=a) for r, a in zip(planted, rng.permutation([r["adds"] for r in planted]))]
+    # Same 24 values, link destroyed: must not confirm (fixed seed, so deterministic).
+    sh = preregistered(shuffled)
+    assert sh["verdict"] == "not confirmed" and sh["p"] > 0.05, sh
+    assert preregistered(planted[:10])["verdict"] == "pending"
+    print("ok — study: analyses recordings, caches results, groups by session, "
+          "scores the pre-registered test")
 
 
 if __name__ == "__main__":

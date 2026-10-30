@@ -6,6 +6,7 @@ name: Record market data
 # then the analyses run and their results are appended to the `data` branch:
 #   study.csv           what order flow adds beyond the price path, per recording
 #   leadlag_study.csv   which venue moved first, per recording
+#   study_report.txt    every recording by session, plus the pre-registered test's status
 #   latest_report.txt   the full research report on the newest recording
 # Raw recordings are kept as workflow artifacts for 30 days.
 #
@@ -83,16 +84,16 @@ jobs:
       - name: Analyse
         working-directory: engine
         run: |
-          python study.py
+          python study.py | tee data/study_report.txt
           python leadlag.py "data/leadlag_*.jsonl.gz"
           python research.py "data/kraken_BTCUSD_*.jsonl.gz" | tee data/latest_report.txt
 
       - name: Save results to the data branch
         run: |
-          cp engine/data/study.csv engine/data/leadlag_study.csv engine/data/latest_report.txt results/
+          cp engine/data/study.csv engine/data/study_report.txt engine/data/leadlag_study.csv engine/data/latest_report.txt results/
           cd results
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add study.csv leadlag_study.csv latest_report.txt
+          git add study.csv study_report.txt leadlag_study.csv latest_report.txt
           git commit -qm "data: recording at $(date '+%Y-%m-%d %H:%M %Z')" || echo "nothing new to commit"
           git push origin data

@@ -271,4 +271,4 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 Move the simulator's agents into compiled code, since the measurement above says that's the only way past a ~1.9x end-to-end gain, and do it with the same discipline as the engine ports: a differential test that holds the Python agents as the oracle.
 
-After that, the one lead the week of data turned up: whether order flow's extra information tracks how often the price moves, tested on fresh recordings rather than the ones that suggested it, and the stylized facts run on real book returns next to the simulator's.
+After that, the one lead the week of data turned up. It's now a pre-registered test, written into `engine/study.py` on 2026-10-30 before any of its data existed: on the first 24 hour-long recordings after that date, order flow should add more in hours where the mid moves more often (rank correlation above zero, one-sided p below 0.05). The sample size is fixed in advance so the answer can't be steered by choosing when to stop, and the recordings run themselves. Whatever it says goes in here. Then the stylized facts on real book returns next to the simulator's.

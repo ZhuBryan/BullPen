@@ -29,9 +29,11 @@ import sys
 from pathlib import Path
 
 try:
-    from engine.orderbook import BUY, SELL, Book, counter_clock
+    from engine.orderbook import Book, counter_clock
+    from engine.wal import apply_op
 except ImportError:
-    from orderbook import BUY, SELL, Book, counter_clock
+    from orderbook import Book, counter_clock
+    from wal import apply_op
 
 HERE = Path(__file__).parent
 RUST_BIN = HERE / "rust" / "target" / "release" / "bullpen_engine"
@@ -95,15 +97,7 @@ def replay(path):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        f = line.split()
-        if f[0] == "L":
-            book.limit(BUY if f[1] == "B" else SELL, int(f[2]), int(f[3]))
-        elif f[0] == "M":
-            book.market(BUY if f[1] == "B" else SELL, int(f[2]))
-        elif f[0] == "X":
-            book.cancel(int(f[1]))
-        else:
-            raise ValueError(f"unknown op {f[0]}")
+        apply_op(book, line)
     return [encode(e) for e in book.events]
 
 

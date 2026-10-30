@@ -14,6 +14,7 @@ The pieces, each usable on its own:
 8. **Research pipeline** with purged walk-forward validation
 9. **Metrics**: latency histograms and counters, Prometheus exposition
 10. **Python bindings for the Rust engine** (PyO3), so the rest of the project can run on it
+11. **Crash recovery**: a checksummed write-ahead log of commands, tested by crashing at every byte offset
 
 The Python side is standard library plus numpy; the Rust port is standard library only. No API keys, no paid data, no framework.
 
@@ -103,6 +104,14 @@ Kraken is the second live source, added because Binance is unavailable from Cana
 The two exchanges protect book integrity in opposite ways. Binance numbers every update, so a missing number tells you that you missed a message *before* you apply anything, and you resync from a REST snapshot. Kraken v2 sends no sequence numbers. Instead each message carries a CRC32 checksum of the top 10 levels as they should look after the update, so you apply it, hash your own book and compare. A mismatch tells you your state is wrong whatever the cause (a lost message, a parsing bug, a forgotten depth truncation), and the fix is to resubscribe for a fresh snapshot. The checksum catches more kinds of bug than a sequence number, but only after the fact and only for the top 10 levels. Prices and sizes are held as exact integer ticks and lots, which is also what makes the checksum string trivial to build, and the implementation is pinned to the worked example in Kraken's own documentation (checksum 3310070434).
 
 `research.py` then runs an order-flow forecast on a capture: OFI over a window, top-of-book imbalance and spread at time t, predicting the sign of the mid move over the next h events, with purged walk-forward folds, an overlap-adjusted IC t-stat, baselines, costs and negative controls. One finding worth knowing: the older microprice-label pipeline scores AUC around 0.65 on pure noise, because queue sizes mean-revert, so use the mid-based evaluation for any real claim.
+
+## Surviving a crash
+
+The engine is deterministic, so the book itself never needs saving: only the commands that built it. `wal.py` writes each command to disk, with a CRC32 and a record number, before applying it, and `append()` returns only after `fsync`. After a crash, replaying the log into an empty book rebuilds the exact state, events and all.
+
+The two kinds of damage are handled differently on purpose. An incomplete last record is a normal crash (that order was never acknowledged), so it is dropped and the log carries on. A complete record that fails its check is a disk or software fault; dropping it and everything after it would lose orders that were acknowledged, so opening the log refuses unless you ask it to repair.
+
+The self-check doesn't sample, it's exhaustive on a 120-command log: it cuts the file at all 2,782 byte offsets, and flips every bit of each of the 2,781 bytes in turn. Every crash recovers exactly the complete records, every corruption is caught at the record it hit, and a duplicated record (valid checksum, wrong place) is caught by its number. Breaking the checksum check, the numbering check, the torn-tail handling or the truncation each makes it fail.
 
 ## Order entry, FIX and the OMS
 
@@ -218,6 +227,7 @@ instruments.py tick regimes, lot rules, multi-symbol Venue
 metrics.py     latency histograms, counters, Prometheus text
 bench.py       throughput and tail latency harness
 diff_test.py   proves the Rust engine matches this one, event for event
+wal.py         write-ahead log: commands hit disk before they run; recovery replays them
 fastbook.py    picks the Rust book when its Python extension is built, else this one
 test_pyo3.py   20,000 random ops through both engines via PyO3, every event compared
 test.py        runs every self-check

@@ -7,7 +7,7 @@ import traceback
 
 MODULES = ["orderbook", "capture", "replay", "research", "risk",
            "fix", "fix_session", "oms", "execution", "instruments", "metrics",
-           "fastbook", "test_pyo3", "study", "leadlag"]
+           "fastbook", "test_pyo3", "study", "leadlag", "wal"]
 
 failed = []
 for name in MODULES:

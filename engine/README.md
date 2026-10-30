@@ -66,6 +66,8 @@ Correctness is established separately and first: `diff_test.py` feeds both engin
 
 **Where the tail comes from.** Both engines still show a multi-millisecond worst case, and neither is a bug in the matching logic: it is the allocator growing the event log and, in Python, the garbage collector. That is why p99.9 is quoted rather than the max, and why the max is shown at all instead of hidden.
 
+The C++ port shows that this is fixable. Timing every op and sorting the slowest found two causes: the event log doubling (a copy of everything written so far) and first-touch page faults on fresh memory, once every ~70 events. Sizing the log and slab at startup and touching the pages, as a venue would, took its p99 from 4.4us to 0.74us and its max from 9.9ms to 0.23ms on the same file, with identical events ([cpp/README.md](cpp/README.md)). Rust has the same doubling log and would likely gain the same way.
+
 **How the Python speedup happened**, because the process matters more than the number. The first attempt replaced `max()`/`min()` scans over the price dictionaries with a bisect-maintained sorted index. That improved the median by 24% and barely moved the tail, which meant the hypothesis was wrong. Profiling per operation type showed why: cancels had an 82us median against 2.4us for limits, 34x worse, because removing an order from the middle of its queue is a linear scan and `deque` makes random access worse. GC was ruled out by rerunning with collection disabled. Replacing eager removal with lazy cancellation, where a cancel flags the order and decrements a per-level live counter, produced the numbers above.
 
 ## Concurrency

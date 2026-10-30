@@ -62,10 +62,19 @@ the language and not the algorithm:
 - **Price levels**: `std::map<Price, Level>` per side. Best bid is the last
   key, best ask the first. One deviation from Rust, behaviour-neutral: Rust
   keeps two parallel maps (price to queue, price to live count) and always
-  updates them together; here they are one map of `Level{fifo, live}`, which
-  halves the tree lookups and makes it impossible for the two to drift apart.
-- **Orders**: a flat `std::vector<Order>` slab referenced by index, plus an
-  `std::unordered_map<OrderId, slot>` for O(1) cancel.
+  updates them together; here they are one map of `Level{head, tail, live}`,
+  which halves the tree lookups and makes it impossible for the two to drift
+  apart.
+- **Orders**: a flat `std::vector<Order>` slab. Ids are issued 1, 2, 3... and
+  each order takes the next slot, so order `id` is in slot `id - 1` and a
+  cancel is an array index. No hash map.
+- **Queues**: each level's FIFO is an intrusive singly linked list threaded
+  through the slab (`Order::next`), so joining or leaving a queue never
+  allocates. (Rust and Python still use a deque per level; the event logs are
+  identical either way, which is what `diff_test.py` checks.)
+- **Preallocation**: `Book::reserve(orders, events)` sizes the slab and event
+  log for a session and touches the memory up front, the way a venue sizes its
+  memory at startup. The bench calls it; a book that outgrows it still works.
 - **Lazy cancellation**: a cancel flags the order and decrements the level's
   live count; matching discards the flagged husk when it reaches it. A level
   whose live count hits zero is erased at once, so it never advertises a
@@ -99,6 +108,34 @@ the last one; the full check is O(book), and per-op it makes a 200,000-op
 replay quadratic. The O(1) checks (book not crossed, seq dense) run after every
 op throughout.
 
+## Where the speed came from
+
+The first version used a `std::deque` per level and an `std::unordered_map`
+for cancels, and its p99 was 4.4 us against a 180 ns median. Timing every op
+and sorting the slowest showed two causes, neither of them matching logic:
+
+- The worst ops (up to 12 ms) were plain limit orders that happened to make
+  the event log or slab double, copying everything written so far.
+- The p99 itself was page faults. An `Event` is about 56 bytes, so a fresh
+  4 KB page gets written once every ~70 events, roughly 1.4% of ops, and the
+  first write to a page costs the kernel a few microseconds.
+
+Replacing the deque and hash map with the intrusive list and slot = id - 1
+gave about 20% more throughput and barely moved the tail. `reserve()` fixed
+the tail: same 200,000-op file, same VM, median of 3 runs each, old and new
+interleaved:
+
+| | before | after | |
+|---|---|---|---|
+| throughput | 1.92M ops/sec | 3.37M ops/sec | 1.8x |
+| p50 | 181 ns | 130 ns | |
+| p90 | 621 ns | 341 ns | |
+| p99 | 4,378 ns | 741 ns | 5.9x |
+| p99.9 | 11,661 ns | 1,553 ns | 7.5x |
+| max | 9.9 ms | 0.23 ms | |
+
+Both emitted 239,703 events and `diff_test.py` still matches Python exactly.
+
 ## What I would change for more speed
 
 Measured first, not assumed; these are the likely wins in order:
@@ -107,16 +144,12 @@ Measured first, not assumed; these are the likely wins in order:
    narrow band of ticks. An array indexed by `price - base` with a tracked best
    index replaces the red-black tree's pointer chasing with one cache line, at
    the cost of a fallback for prices outside the band.
-2. **Intrusive FIFO lists.** Store `prev`/`next` slot indices in the order
-   itself instead of a `std::deque<std::size_t>` per level. Cancels could then
-   unlink in O(1) and lazy husks would disappear, and a level would no longer
-   own a separately allocated deque.
-3. **Pool allocation and pre-sizing.** The event log and slab grow by doubling;
-   the multi-millisecond `max` below is consistent with one of those
-   reallocations copying several MB. Chunked event storage (or writing events
-   to a ring and draining them) removes that tail; an open-addressing hash map
-   with ids as near-dense keys (or simply a vector indexed by id) beats
-   `std::unordered_map` node allocation.
+2. **A doubly linked queue.** With a `prev` index too, a cancel could unlink
+   in O(1) and lazy husks would disappear. Not obviously a win: lazy cancel is
+   already O(1), and husks cost only a skipped node.
+3. **A ring for events.** The log keeps every event forever; a production
+   engine writes them to a ring a separate thread drains to disk, so memory
+   stays flat for a session of any length.
 4. A smaller `Order`: `std::optional<Price>` costs 16 bytes where a sentinel
    price of 0 (already illegal) would do.
 
@@ -129,17 +162,18 @@ is `bench.py --repeats 3`, median of 3.
 
 | | Python | C++ | ratio |
 |---|---|---|---|
-| throughput | 200,739 ops/sec | 1,797,470 ops/sec [1.73M-2.00M] | 9.0x |
-| ns per op | 4,982 | 556 | 9.0x |
-| p50 | 3,277 ns | 180 ns | 18x |
-| p90 | 5,771 ns | 701 ns | 8.2x |
-| p99 | 23,854 ns | 4,318 ns | 5.5x |
-| p99.9 | 93,445 ns | 13,886 ns | 6.7x |
-| max | 35.9 ms | 7.8 ms | 4.6x |
+| throughput | 253,462 ops/sec | 3,372,458 ops/sec [3.06M-3.44M] | 13x |
+| ns per op | 3,945 | 297 | 13x |
+| p50 | 2,304 ns | 130 ns | 18x |
+| p90 | 4,198 ns | 341 ns | 12x |
+| p99 | 14,888 ns | 741 ns | 20x |
+| p99.9 | 72,555 ns | 1,553 ns | 47x |
+| max | 96 ms | 0.23 ms | |
 
-Timer overhead was 40 ns (steady_clock, 1 ns period) for C++ and 90 ns for
-Python, so the C++ p50 is about 4.5x the timer floor: usable, but quote
-throughput first.
+Timer overhead was about 40 ns (steady_clock, 1 ns period) for C++ and 100 ns
+for Python, so the C++ p50 is about 3x the timer floor: usable, but quote
+throughput first. (Before the changes above this table read 1.8M ops/sec and
+9x.)
 
 **Caveat:** these were measured in a shared 2-vCPU Linux VM (g++ 11.4), where
 other tenants add noise to every percentile. The Rust numbers in

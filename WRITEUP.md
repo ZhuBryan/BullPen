@@ -259,7 +259,7 @@ The things this does not do, since a half-built project described accurately is 
 - **The matching engine is still single-threaded.** There is now a lock-free SPSC queue and a two-thread pipeline mode measured against a mutex baseline, but the deterministic single-threaded path remains what the differential test runs against, on purpose: an oracle has to be reproducible.
 - **Multi-symbol, but not multi-threaded across symbols.** There is an instrument registry and a venue that routes each symbol to its own book, but one thread serves all of them. Sharding symbols across threads is the obvious scaling step, since books don't interact.
 - **Live capture tested against a fake feed, not the real exchange.** A local websocket server speaking Binance's wire format, with a scripted sequence gap. It found a real bug on the first run: a closed socket raised an unhandled exception and killed the recorder, despite the module claiming to handle disconnects. What it does not cover is the real feed's rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
-- **The tail is still allocator-bound.** Both engines show a multi-millisecond worst case, which is the event log growing, not the matching logic. That is why p99.9 is the quoted figure and why the max is shown rather than hidden.
+- **The Rust and Python tails are still allocator-bound.** Both show a multi-millisecond worst case, which is the event log growing, not the matching logic. In C++ I traced it: the doubling log, plus a page fault on every fresh 4 KB of it. Reserving and touching that memory at startup cut the C++ p99 from 4.4us to 0.74us and lifted throughput from 1.9M to 3.4M ops/sec on the same file. Rust hasn't had the same treatment yet.
 
 ## No claim of profitability
 

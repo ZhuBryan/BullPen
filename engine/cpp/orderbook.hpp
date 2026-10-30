@@ -16,13 +16,19 @@
 // Prices are integer ticks and quantities are integer shares, never floats:
 // 0.1 + 0.2 != 0.3, and money bugs from float rounding are silent.
 //
-// Data structures mirror the Rust design:
+// Data structures follow the Rust design, except the id lookup and queues:
 //   * price levels:  std::map<Price, Level>, an ordered tree, so the best bid
 //     is the last key and the best ask the first key (O(1) via begin/rbegin,
 //     O(log n) insert/erase).
 //   * order storage: one flat std::vector<Order> (a slab), referenced by
 //     index, so orders are contiguous instead of individually heap-allocated.
-//   * id lookup:     std::unordered_map<OrderId, slot> for O(1) cancel.
+//   * id lookup:     none needed. Ids are issued 1, 2, 3... and every order
+//     takes the next slab slot, so order `id` lives in slot id - 1. Cancel is
+//     an array index, not a hash lookup.
+//   * per-level FIFO: an intrusive singly linked list threaded through the
+//     slab (Order::next), with head/tail in the Level. Joining or leaving a
+//     queue never allocates; a std::deque allocated a 512-byte chunk for
+//     every new price level.
 //   * cancellation:  lazy. A cancel flags the order and decrements the level's
 //     live counter; matching pops the flagged "husk" when it reaches it. A
 //     level whose live count hits 0 is erased at once, which is why the
@@ -31,15 +37,15 @@
 // One deliberate, behaviour-neutral deviation from Rust: Rust keeps two
 // parallel maps per side (price -> queue and price -> live count) and always
 // inserts and removes them together. Here they are one map of
-// Level{fifo, live}, which halves the tree lookups and makes it impossible
+// Level{head, tail, live}, which halves the tree lookups and makes it impossible
 // for the two to drift out of sync.
 //
 // Invariants (checked by Book::check_invariants, which throws on violation):
 //   I1  best bid < best ask whenever both exist (the book is never crossed).
 //   I2  every advertised level has live > 0, and live equals the number of
 //       non-cancelled orders in its FIFO.
-//   I3  every live resting order has remaining > 0 and is in the id index,
-//       mapped to its own slab slot; the index holds nothing else.
+//   I3  every live resting order has remaining > 0 and is flagged resting;
+//       nothing else is flagged resting.
 //   I4  seq is dense: the n-th event has seq n.
 
 #pragma once
@@ -49,7 +55,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <initializer_list>
 #include <iterator>
 #include <map>
@@ -57,7 +62,6 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -81,6 +85,8 @@ enum class Side : char { Buy = 'B', Sell = 'S' };
     return s == Side::Buy ? Side::Sell : Side::Buy;
 }
 
+inline constexpr std::size_t kNoSlot = static_cast<std::size_t>(-1);
+
 struct Order {
     OrderId id;
     Side side;
@@ -88,6 +94,8 @@ struct Order {
     Qty qty;
     Qty remaining;
     bool cancelled;
+    bool resting = false;        // live on the book: what has_order() reports
+    std::size_t next = kNoSlot;  // next order in the same level's FIFO
 };
 
 // ---- events -------------------------------------------------------------
@@ -213,8 +221,21 @@ public:
     explicit Book(Clock clock = Clock::Steady)
         : clock_(clock), start_(std::chrono::steady_clock::now()) {
         slab_.reserve(1024);
-        index_.reserve(1024);
         events_.reserve(1024);
+    }
+
+    // Size the order slab and event log for a session up front, and touch
+    // the memory now. Without this, the vectors double as they fill: every
+    // doubling copies the whole log (milliseconds, once the log is large),
+    // and every fresh 4 KB page costs a page fault the first time it is
+    // written (microseconds, once every ~70 events). Real venues size their
+    // memory at startup for the same reason. Only capacity changes: a book
+    // that outgrows the reservation still works, it just grows as before.
+    void reserve(std::size_t orders, std::size_t events) {
+        slab_.resize(std::max(orders, slab_.size()));  // resize writes every page...
+        slab_.resize(next_id_ - 1);                    // ...then drop back; capacity stays
+        events_.resize(std::max(events, events_.size()));
+        events_.resize(seq_);
     }
 
     [[nodiscard]] static Book deterministic() { return Book(Clock::Deterministic); }
@@ -249,16 +270,13 @@ public:
     // about. A replay loop that only wants the event log says so with a void
     // cast.
     [[nodiscard]] bool cancel(OrderId id) {
-        const auto found = index_.find(id);
-        if (found == index_.end()) {
+        if (!has_order(id)) {
             const auto [seq, ts] = stamp();
             events_.emplace_back(ev::RejectCancel{seq, ts, id});
             return false;
         }
-        const std::size_t slot = found->second;
-        index_.erase(found);
-
-        Order& o = slab_[slot];
+        Order& o = slab_[id - 1];
+        o.resting = false;
         o.cancelled = true;  // lazy: the husk stays in its FIFO until reached
         if (o.price) {
             Levels& side = levels(o.side);
@@ -307,15 +325,18 @@ public:
     [[nodiscard]] const std::vector<Event>& events() const noexcept { return events_; }
 
     // True while the order is resting and live (not filled, not cancelled).
-    [[nodiscard]] bool has_order(OrderId id) const { return index_.count(id) != 0; }
+    [[nodiscard]] bool has_order(OrderId id) const noexcept {
+        return id >= 1 && id <= slab_.size() && slab_[id - 1].resting;
+    }
 
     // Live resting ids, ascending. Ids are issued in arrival order and an
     // order rests at most once, so this matches Python's dict order.
+    // ponytail: O(every order ever) scan; only tests and replays call it.
     [[nodiscard]] std::vector<OrderId> order_ids() const {
         std::vector<OrderId> ids;
-        ids.reserve(index_.size());
-        for (const auto& kv : index_) ids.push_back(kv.first);
-        std::sort(ids.begin(), ids.end());
+        for (const Order& o : slab_) {
+            if (o.resting) ids.push_back(o.id);
+        }
         return ids;
     }
 
@@ -323,7 +344,9 @@ public:
     // conservation check: submitted == 2*filled + canceled + resting.
     [[nodiscard]] Qty resting_qty() const {
         Qty total = 0;
-        for (const auto& kv : index_) total += slab_[kv.second].remaining;
+        for (const Order& o : slab_) {
+            if (o.resting) total += o.remaining;
+        }
         return total;
     }
 
@@ -339,23 +362,22 @@ public:
         for (const Levels* side : {&bids_, &asks_}) {
             for (const auto& [price, level] : *side) {
                 std::int64_t actual = 0;
-                for (const std::size_t slot : level.fifo) {
+                for (std::size_t slot = level.head; slot != kNoSlot; slot = slab_[slot].next) {
                     const Order& o = slab_[slot];
                     if (!o.price || *o.price != price) fail("I2 order queued at the wrong price");
                     if (o.cancelled) continue;
                     ++actual;
                     if (o.remaining <= 0) fail("I3 fully filled order still resting");
-                    const auto it = index_.find(o.id);
-                    if (it == index_.end() || it->second != slot) {
-                        fail("I3 resting order missing from index");
-                    }
+                    if (!o.resting || o.id != slot + 1) fail("I3 resting order not flagged");
                 }
                 if (level.live != actual) fail("I2 live count out of sync");
                 if (actual <= 0) fail("I2 level advertised with no live orders");
                 live_total += static_cast<std::size_t>(actual);
             }
         }
-        if (live_total != index_.size()) fail("I3 index holds non-resting orders");
+        std::size_t flagged = 0;
+        for (const Order& o : slab_) flagged += o.resting ? 1 : 0;
+        if (live_total != flagged) fail("I3 order flagged resting but not on the book");
     }
 
     // The O(1) subset of check_invariants: I1 and I4.
@@ -368,8 +390,9 @@ public:
 
 private:
     struct Level {
-        std::deque<std::size_t> fifo;  // slab slots in arrival order, husks included
-        std::int64_t live = 0;         // non-cancelled orders in fifo
+        std::size_t head = kNoSlot;  // oldest slab slot in the queue, husks included
+        std::size_t tail = kNoSlot;  // newest, where arrivals join
+        std::int64_t live = 0;       // non-cancelled orders in the queue
     };
     using Levels = std::map<Price, Level>;
 
@@ -381,7 +404,7 @@ private:
 
     [[nodiscard]] Qty live_qty(const Level& level) const {
         Qty q = 0;
-        for (const std::size_t slot : level.fifo) {
+        for (std::size_t slot = level.head; slot != kNoSlot; slot = slab_[slot].next) {
             if (!slab_[slot].cancelled) q += slab_[slot].remaining;
         }
         return q;
@@ -426,12 +449,22 @@ private:
                 o.remaining = 0;
             } else {
                 Level& level = levels(side)[*price];  // creates the level if new
-                level.fifo.push_back(slot);
+                if (level.tail == kNoSlot) {
+                    level.head = slot;
+                } else {
+                    slab_[level.tail].next = slot;
+                }
+                level.tail = slot;
                 ++level.live;
-                index_.emplace(id, slot);
+                o.resting = true;
             }
         }
         return id;
+    }
+
+    void pop_front(Level& level) noexcept {
+        level.head = slab_[level.head].next;
+        if (level.head == kNoSlot) level.tail = kNoSlot;
     }
 
     [[nodiscard]] static bool crosses(const Order& taker, Price best) noexcept {
@@ -451,10 +484,10 @@ private:
             if (!crosses(taker, best)) break;
 
             Level& level = it->second;
-            while (taker.remaining > 0 && !level.fifo.empty()) {
-                Order& resting = slab_[level.fifo.front()];
+            while (taker.remaining > 0 && level.head != kNoSlot) {
+                Order& resting = slab_[level.head];
                 if (resting.cancelled) {  // husk left by a lazy cancel: drop, never fill
-                    level.fifo.pop_front();
+                    pop_front(level);
                     continue;
                 }
                 const Qty traded = std::min(taker.remaining, resting.remaining);
@@ -464,9 +497,9 @@ private:
                 events_.emplace_back(ev::Trade{seq, ts, best, traded, taker.id, resting.id});
 
                 if (resting.remaining == 0) {
-                    level.fifo.pop_front();
+                    resting.resting = false;
+                    pop_front(level);
                     --level.live;
-                    index_.erase(resting.id);
                 }
             }
 
@@ -485,8 +518,7 @@ private:
     std::chrono::steady_clock::time_point start_;
     Levels bids_;
     Levels asks_;
-    std::vector<Order> slab_;                          // never shrinks; slot = index
-    std::unordered_map<OrderId, std::size_t> index_;   // live resting id -> slot
+    std::vector<Order> slab_;  // never shrinks; order id N is in slot N - 1
     std::vector<Event> events_;
     OrderId next_id_ = 1;
     std::uint64_t seq_ = 0;

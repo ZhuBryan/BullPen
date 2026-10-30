@@ -246,7 +246,11 @@ private:
 
 Book run_stream(const std::vector<Op>& ops) {
     Book book;
+    // At most one order and, in this workload, about 1.2 events per op; a
+    // stream that emits more just grows the log past the reservation.
+    book.reserve(ops.size(), 2 * ops.size());
     std::vector<OrderId> live;
+    live.reserve(ops.size());
     for (const Op& op : ops) apply(book, live, op);
     return book;
 }
@@ -311,7 +315,9 @@ int bench(std::optional<std::vector<Op>> ops_in, std::size_t n, std::size_t warm
 
     // --- latency percentiles: each op timed individually ---
     Book timed;
+    timed.reserve(ops.size(), 2 * ops.size());
     std::vector<OrderId> live;
+    live.reserve(ops.size());
     std::vector<long long> lat;
     lat.reserve(n);
     for (const Op& op : ops) {
@@ -545,6 +551,26 @@ void test_cancelled_husk_never_filled() {
     b.check_invariants();
 }
 
+// reserve() changes capacity only: the same stream gives the same log with
+// a reservation made mid-session, one far too small, or none at all.
+void test_reserve_changes_nothing() {
+    const std::vector<Op> ops = make_stream(5'000, 7);
+    const auto log_with = [&ops](std::size_t at, std::size_t orders, std::size_t events) {
+        Book b = Book::deterministic();
+        std::vector<OrderId> live;
+        for (std::size_t i = 0; i < ops.size(); ++i) {
+            if (i == at) b.reserve(orders, events);
+            apply(b, live, ops[i]);
+        }
+        b.check_invariants();
+        return log_of(b);
+    };
+    const auto plain = log_with(ops.size(), 0, 0);
+    expect(log_with(0, 10'000, 20'000) == plain, "reserve up front changed the log");
+    expect(log_with(2'500, 10'000, 20'000) == plain, "reserve mid-session changed the log");
+    expect(log_with(0, 10, 10) == plain, "outgrowing the reservation changed the log");
+}
+
 void test_cancel_never_issued_ids() {
     Book b = Book::deterministic();
     expect(!b.cancel(0), "id 0 is never issued");
@@ -713,6 +739,7 @@ int selftest() {
         {"fully cancelled level stops advertising", test_fully_cancelled_level_stops_advertising},
         {"cancelled husk is never filled", test_cancelled_husk_never_filled},
         {"cancels of never-issued ids", test_cancel_never_issued_ids},
+        {"reserve changes capacity, never behaviour", test_reserve_changes_nothing},
         {"extreme prices 1, 2^53, int64 max", test_extreme_prices},
         {"invalid input rejected without residue", test_invalid_input_rejected},
         {"dense seq, monotonic and deterministic clocks", test_seq_and_clocks},

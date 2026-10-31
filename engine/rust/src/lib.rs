@@ -162,6 +162,16 @@ impl Event {
     }
 }
 
+/// Grow `v`'s capacity to `n` and write zeros over the unused part, so the
+/// OS maps those pages now rather than mid-session. Writing into
+/// MaybeUninit is safe; the length (what the Vec considers valid) is unchanged.
+fn touch<T>(v: &mut Vec<T>, n: usize) {
+    v.reserve(n.saturating_sub(v.len()));
+    for slot in v.spare_capacity_mut() {
+        *slot = std::mem::MaybeUninit::zeroed();
+    }
+}
+
 /// One side of the book: price -> FIFO queue of slab indices, plus a live count.
 #[derive(Default)]
 struct BookSide {
@@ -202,6 +212,19 @@ impl Book {
             start: Instant::now(),
             deterministic_ts: false,
         }
+    }
+
+    /// Size the order slab, id index and event log for a session up front, and
+    /// touch the memory now. Without this the vectors double as they fill:
+    /// every doubling copies the whole log (milliseconds, once it is large),
+    /// and every fresh 4 KB page costs a page fault the first time it is
+    /// written (microseconds, once every ~70 events). In the C++ port this
+    /// took p99 from 4.4us to 0.74us. Only capacity changes: a book that
+    /// outgrows the reservation still works, it just grows as before.
+    pub fn reserve(&mut self, orders: usize, events: usize) {
+        touch(&mut self.slab, orders);
+        touch(&mut self.events, events);
+        self.index.reserve(orders.saturating_sub(self.index.len()));
     }
 
     /// Timestamps mirror the sequence number, so the log is byte-reproducible.
@@ -487,6 +510,46 @@ impl Book {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// reserve() changes capacity only: the same ops give the same log with
+    /// a reservation up front, mid-session, far too small, or none at all.
+    #[test]
+    fn reserve_changes_nothing() {
+        let run = |at: usize, orders: usize, events: usize| {
+            let mut b = Book::deterministic();
+            let mut live: Vec<OrderId> = Vec::new();
+            let mut s: u64 = 7;
+            for i in 0..5_000usize {
+                if i == at {
+                    b.reserve(orders, events);
+                }
+                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let r = s >> 33;
+                let side = if r % 2 == 0 { Side::Buy } else { Side::Sell };
+                let qty = (r % 100) as i64 + 1;
+                match r % 10 {
+                    0 | 1 => {
+                        if let Some(id) = live.pop() {
+                            b.cancel(id);
+                        }
+                    }
+                    2 => {
+                        b.market(side, qty);
+                    }
+                    _ => {
+                        let off = (r % 12) as i64 + 1;
+                        let price = if side == Side::Buy { 10_000 - off } else { 10_000 + off };
+                        live.push(b.limit(side, price, qty));
+                    }
+                }
+            }
+            b.events.iter().map(|e| e.encode()).collect::<Vec<_>>()
+        };
+        let plain = run(usize::MAX, 0, 0);
+        assert_eq!(run(0, 10_000, 20_000), plain, "reserve up front changed the log");
+        assert_eq!(run(2_500, 10_000, 20_000), plain, "reserve mid-session changed the log");
+        assert_eq!(run(0, 10, 10), plain, "outgrowing the reservation changed the log");
+    }
 
     fn trades(b: &Book) -> Vec<(Price, Qty, OrderId, OrderId)> {
         b.events

@@ -66,7 +66,10 @@ fn make_stream(n: usize, seed: u64) -> Vec<Op> {
 
 fn run_stream(ops: &[Op]) -> Book {
     let mut book = Book::new();
-    let mut live: Vec<u64> = Vec::new();
+    // At most one order and about 1.2 events per op in this workload; a
+    // stream that emits more just grows the log past the reservation.
+    book.reserve(ops.len(), 2 * ops.len());
+    let mut live: Vec<u64> = Vec::with_capacity(ops.len());
     for op in ops {
         apply(&mut book, &mut live, *op);
     }
@@ -142,7 +145,8 @@ fn bench(ops_in: Option<Vec<Op>>, n: usize, warmup: usize) {
 
     // --- latency percentiles: each op timed individually ---
     let mut book = Book::new();
-    let mut live: Vec<u64> = Vec::new();
+    book.reserve(ops.len(), 2 * ops.len());
+    let mut live: Vec<u64> = Vec::with_capacity(ops.len());
     let mut lat: Vec<u128> = Vec::with_capacity(n);
     for op in &ops {
         let t = Instant::now();

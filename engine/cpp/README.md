@@ -70,8 +70,8 @@ the language and not the algorithm:
   cancel is an array index. No hash map.
 - **Queues**: each level's FIFO is an intrusive singly linked list threaded
   through the slab (`Order::next`), so joining or leaving a queue never
-  allocates. (Rust and Python still use a deque per level; the event logs are
-  identical either way, which is what `diff_test.py` checks.)
+  allocates. (Rust now does the same; Python still uses a deque per level. The event
+  logs are identical either way, which is what `diff_test.py` checks.)
 - **Preallocation**: `Book::reserve(orders, events)` sizes the slab and event
   log for a session and touches the memory up front, the way a venue sizes its
   memory at startup. The bench calls it; a book that outgrows it still works.

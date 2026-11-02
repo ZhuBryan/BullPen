@@ -15,9 +15,15 @@
 //!   O(log n) and compiled. No workaround needed.
 //!
 //! * ORDER STORAGE. Orders live in one flat `Vec` (a slab) and are referenced
-//!   by index. Ids map to slots through a `HashMap`, so cancelling is O(1) and
-//!   the orders themselves stay contiguous in memory instead of being scattered
-//!   across individually allocated objects.
+//!   by index, so they stay contiguous in memory instead of being scattered
+//!   across individually allocated objects. Ids are issued 1, 2, 3... and
+//!   each order takes the next slot, so order `id` is in slot `id - 1`: a
+//!   cancel is an array index, with no hash map.
+//!
+//! * QUEUES. Each price level's FIFO is a singly linked list threaded through
+//!   the slab (`Order::next`), with head and tail stored in the level. Joining
+//!   or leaving a queue never allocates; a `VecDeque` per level allocated
+//!   every time a new price level opened.
 //!
 //! * CANCELLATION. Same lazy scheme as Python: cancelling flags the order and
 //!   decrements a per-level live counter, and matching skips the husks. The
@@ -26,7 +32,7 @@
 //! Prices are integer ticks. Never floats: 0.1 + 0.2 != 0.3 and money bugs from
 //! float rounding are silent.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 pub mod spsc;
@@ -63,7 +69,13 @@ pub struct Order {
     pub qty: Qty,
     pub remaining: Qty,
     pub cancelled: bool,
+    /// Live on the book: what `has_order` reports.
+    pub resting: bool,
+    /// Next order in the same price level's queue (NO_SLOT at the back).
+    next: usize,
 }
+
+const NO_SLOT: usize = usize::MAX;
 
 /// Everything the engine emits. Formatted identically to the Python side so the
 /// two logs can be diffed directly.
@@ -172,18 +184,32 @@ fn touch<T>(v: &mut Vec<T>, n: usize) {
     }
 }
 
-/// One side of the book: price -> FIFO queue of slab indices, plus a live count.
+/// One price level: a FIFO of slab slots (husks included) and how many of
+/// them are live. The count is what stops a level of pure husks from
+/// advertising a price nobody can trade at.
+#[derive(Clone, Copy)]
+struct Level {
+    head: usize,
+    tail: usize,
+    live: i64,
+}
+
+impl Default for Level {
+    fn default() -> Self {
+        Level { head: NO_SLOT, tail: NO_SLOT, live: 0 }
+    }
+}
+
+/// One side of the book: price -> level.
 #[derive(Default)]
 struct BookSide {
-    levels: BTreeMap<Price, VecDeque<usize>>,
-    live: BTreeMap<Price, i64>,
+    levels: BTreeMap<Price, Level>,
 }
 
 pub struct Book {
     bids: BookSide,
     asks: BookSide,
-    slab: Vec<Order>,
-    index: HashMap<OrderId, usize>, // id -> slab slot, for O(1) cancel
+    slab: Vec<Order>, // never shrinks; order id N is in slot N - 1
     pub events: Vec<Event>,
     next_id: OrderId,
     seq: u64,
@@ -205,7 +231,6 @@ impl Book {
             bids: BookSide::default(),
             asks: BookSide::default(),
             slab: Vec::with_capacity(1024),
-            index: HashMap::with_capacity(1024),
             events: Vec::with_capacity(1024),
             next_id: 1,
             seq: 0,
@@ -214,7 +239,7 @@ impl Book {
         }
     }
 
-    /// Size the order slab, id index and event log for a session up front, and
+    /// Size the order slab and event log for a session up front, and
     /// touch the memory now. Without this the vectors double as they fill:
     /// every doubling copies the whole log (milliseconds, once it is large),
     /// and every fresh 4 KB page costs a page fault the first time it is
@@ -224,7 +249,6 @@ impl Book {
     pub fn reserve(&mut self, orders: usize, events: usize) {
         touch(&mut self.slab, orders);
         touch(&mut self.events, events);
-        self.index.reserve(orders.saturating_sub(self.index.len()));
     }
 
     /// Timestamps mirror the sequence number, so the log is byte-reproducible.
@@ -265,37 +289,55 @@ impl Book {
                 .iter()
                 .rev()
                 .take(levels)
-                .map(|(&p, q)| (p, self.live_qty(q)))
+                .map(|(&p, l)| (p, self.live_qty(l)))
                 .collect(),
             Side::Sell => self
                 .asks
                 .levels
                 .iter()
                 .take(levels)
-                .map(|(&p, q)| (p, self.live_qty(q)))
+                .map(|(&p, l)| (p, self.live_qty(l)))
                 .collect(),
         }
     }
 
-    fn live_qty(&self, q: &VecDeque<usize>) -> Qty {
-        q.iter()
-            .filter(|&&slot| !self.slab[slot].cancelled)
-            .map(|&slot| self.slab[slot].remaining)
+    /// Slab slots in a level's queue, front to back, husks included.
+    fn queue(&self, level: &Level) -> impl Iterator<Item = usize> + '_ {
+        let mut slot = level.head;
+        std::iter::from_fn(move || {
+            if slot == NO_SLOT {
+                return None;
+            }
+            let here = slot;
+            slot = self.slab[here].next;
+            Some(here)
+        })
+    }
+
+    fn live_qty(&self, level: &Level) -> Qty {
+        self.queue(level)
+            .filter(|&slot| !self.slab[slot].cancelled)
+            .map(|slot| self.slab[slot].remaining)
             .sum()
     }
 
     /// True while the order is resting and live (not filled, not cancelled).
     pub fn has_order(&self, id: OrderId) -> bool {
-        self.index.contains_key(&id)
+        id >= 1 && (id as usize) <= self.slab.len() && self.slab[id as usize - 1].resting
+    }
+
+    /// Total shares resting on the book (live orders only).
+    pub fn resting_qty(&self) -> Qty {
+        self.slab.iter().filter(|o| o.resting).map(|o| o.remaining).sum()
     }
 
     /// Ids of all resting live orders, ascending. Ids are issued in arrival
     /// order and an order rests at most once, so ascending id is also the order
     /// Python's insertion-ordered dict yields them in.
+    // ponytail: O(every order ever) scan; only tests and the binding's
+    // introspection call it.
     pub fn order_ids(&self) -> Vec<OrderId> {
-        let mut ids: Vec<OrderId> = self.index.keys().copied().collect();
-        ids.sort_unstable();
-        ids
+        self.slab.iter().filter(|o| o.resting).map(|o| o.id).collect()
     }
 
     fn side_mut(&mut self, side: Side) -> &mut BookSide {
@@ -326,6 +368,8 @@ impl Book {
             qty,
             remaining: qty,
             cancelled: false,
+            resting: false,
+            next: NO_SLOT,
         });
         let (seq, ts_ns) = self.stamp();
         self.events.push(Event::Accepted {
@@ -354,10 +398,17 @@ impl Book {
                     self.slab[slot].remaining = 0;
                 }
                 Some(p) => {
-                    let s = self.side_mut(side);
-                    s.levels.entry(p).or_default().push_back(slot);
-                    *s.live.entry(p).or_insert(0) += 1;
-                    self.index.insert(id, slot);
+                    let level = self.side_mut(side).levels.entry(p).or_default();
+                    let old_tail = level.tail;
+                    level.tail = slot;
+                    level.live += 1;
+                    if old_tail == NO_SLOT {
+                        level.head = slot; // first order at this price
+                    } else {
+                        // `level` is no longer used, so `self` is free again
+                        self.slab[old_tail].next = slot;
+                    }
+                    self.slab[slot].resting = true;
                 }
             }
         }
@@ -365,26 +416,23 @@ impl Book {
     }
 
     pub fn cancel(&mut self, id: OrderId) -> bool {
-        let slot = match self.index.remove(&id) {
-            Some(s) => s,
-            None => {
-                let (seq, ts_ns) = self.stamp();
-                self.events.push(Event::RejectCancel { seq, ts_ns, id });
-                return false;
-            }
-        };
+        if !self.has_order(id) {
+            let (seq, ts_ns) = self.stamp();
+            self.events.push(Event::RejectCancel { seq, ts_ns, id });
+            return false;
+        }
         let (side, price, remaining) = {
-            let o = &mut self.slab[slot];
-            o.cancelled = true;
+            let o = &mut self.slab[id as usize - 1];
+            o.cancelled = true; // lazy: the husk stays in its queue until reached
+            o.resting = false;
             (o.side, o.price, o.remaining)
         };
         if let Some(p) = price {
             let s = self.side_mut(side);
-            if let Some(c) = s.live.get_mut(&p) {
-                *c -= 1;
-                if *c <= 0 {
+            if let Some(level) = s.levels.get_mut(&p) {
+                level.live -= 1;
+                if level.live <= 0 {
                     s.levels.remove(&p);
-                    s.live.remove(&p);
                 }
             }
         }
@@ -425,23 +473,21 @@ impl Book {
                 _ => break,
             };
 
+            // Copy the level out, work on it, write it back once: one tree
+            // lookup per level instead of one per fill.
+            let mut level = match self.side_mut(opp_side).levels.get(&best) {
+                Some(l) => *l,
+                None => break,
+            };
             loop {
-                if self.slab[slot].remaining == 0 {
+                if self.slab[slot].remaining == 0 || level.head == NO_SLOT {
                     break;
                 }
-                let resting_slot = {
-                    let s = self.side_mut(opp_side);
-                    match s.levels.get_mut(&best).and_then(|q| q.front().copied()) {
-                        Some(rs) => rs,
-                        None => break,
-                    }
-                };
+                let resting_slot = level.head;
 
                 // Husk left behind by a lazy cancel: drop it, do not fill it.
                 if self.slab[resting_slot].cancelled {
-                    if let Some(q) = self.side_mut(opp_side).levels.get_mut(&best) {
-                        q.pop_front();
-                    }
+                    level.head = self.slab[resting_slot].next;
                     continue;
                 }
 
@@ -460,25 +506,26 @@ impl Book {
                 });
 
                 if self.slab[resting_slot].remaining == 0 {
-                    if let Some(q) = self.side_mut(opp_side).levels.get_mut(&best) {
-                        q.pop_front();
-                    }
-                    let s = self.side_mut(opp_side);
-                    if let Some(c) = s.live.get_mut(&best) {
-                        *c -= 1;
-                    }
-                    self.index.remove(&resting_id);
+                    self.slab[resting_slot].resting = false;
+                    level.head = self.slab[resting_slot].next;
+                    level.live -= 1;
                 }
             }
+            if level.head == NO_SLOT {
+                level.tail = NO_SLOT;
+            }
 
-            let empty = {
-                let s = self.side_mut(opp_side);
-                s.live.get(&best).copied().unwrap_or(0) <= 0
-            };
-            if empty {
-                let s = self.side_mut(opp_side);
+            let s = self.side_mut(opp_side);
+            if level.live <= 0 {
                 s.levels.remove(&best);
-                s.live.remove(&best);
+            } else if let Some(l) = s.levels.get_mut(&best) {
+                *l = level;
+            }
+            if level.live > 0 && self.slab[slot].remaining > 0 {
+                // The queue only runs dry with qty left if a live order is
+                // missing from it, which the invariants forbid. Without this
+                // the outer loop would spin forever on the same level.
+                panic!("live level {} with an empty queue", best);
             }
         }
     }
@@ -489,21 +536,30 @@ impl Book {
         if let (Some(b), Some(a)) = (self.best_bid(), self.best_ask()) {
             assert!(b < a, "crossed book: {} >= {}", b, a);
         }
+        let mut live_total = 0i64;
         for (side_name, s) in [("bid", &self.bids), ("ask", &self.asks)] {
-            for (price, q) in s.levels.iter() {
-                let actual = q
-                    .iter()
-                    .filter(|&&slot| !self.slab[slot].cancelled)
-                    .count() as i64;
-                let claimed = s.live.get(price).copied().unwrap_or(0);
+            for (price, level) in s.levels.iter() {
+                let mut actual = 0i64;
+                for slot in self.queue(level) {
+                    let o = &self.slab[slot];
+                    assert_eq!(o.price, Some(*price), "{} order queued at the wrong price", side_name);
+                    if !o.cancelled {
+                        actual += 1;
+                        assert!(o.resting && o.remaining > 0, "{} order {} live but not resting", side_name, o.id);
+                    }
+                }
+                let claimed = level.live;
                 assert_eq!(
                     claimed, actual,
                     "{} live count wrong at {}",
                     side_name, price
                 );
                 assert!(actual > 0, "{} level {} advertised with no live orders", side_name, price);
+                live_total += actual;
             }
         }
+        let flagged = self.slab.iter().filter(|o| o.resting).count() as i64;
+        assert_eq!(live_total, flagged, "order flagged resting but not on the book");
     }
 }
 
@@ -757,11 +813,7 @@ mod tests {
                 _ => {}
             }
         }
-        let resting: i64 = b
-            .index
-            .values()
-            .map(|&slot| b.slab[slot].remaining)
-            .sum();
+        let resting: i64 = b.resting_qty();
 
         // Each fill consumes `traded` from BOTH sides, so a trade of size q
         // accounts for 2q of the submitted shares.

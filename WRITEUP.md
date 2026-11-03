@@ -251,6 +251,8 @@ The Rust engine matches orders 12.7x faster than the Python one, and the market 
 
 That one number settles it. By Amdahl's law, an engine 12.7x faster at 48% of the work gives at most about 1.8x overall, and an infinitely fast one about 1.9x. Batching orders into one call per agent trims the cost of crossing from Python into Rust, but it can't move that ceiling. Only moving the agents themselves out of Python can. It's the cancel story again at a larger scale: measure where the time goes before deciding what to speed up.
 
+So I ported the agents. The hard part wasn't speed, it was proving the port changed nothing. The simulation draws random numbers, so matching Python meant reimplementing CPython's Mersenne Twister in Rust exactly: the same seeding, the same way `random()` builds a float from two 32-bit outputs, the same rejection sampling inside `randint` and `shuffle`. Then every float operation in the same order, Python's round-half-to-even, Python's floor division on negative numbers. With all of that, the Rust market and the Python market agree on every candle, every mid price and every bit of every trader's cash. A 2,000-step run went from 73 ms to 5.8 ms, 13x, against a ceiling of 1.9x for porting the book alone.
+
 ## What fuzzing found
 
 `fuzz.py` throws hostile order streams at all three engines (one price level hammered, prices up to 2^63-1, cancels of ids that never existed or already filled) and shrinks any disagreement to the smallest op file that still shows it. It also feeds random and damaged bytes to every input reader, the C++ one under AddressSanitizer. A 7.5 minute campaign ran 8.67 million ops through Python and C++ with zero disagreements. The matching logic was clean.
@@ -271,7 +273,7 @@ On the first two usable hours, all three lose money before fees: about -$2.5 to 
 
 The things this does not do, since a half-built project described accurately is worth more than a finished one described loosely:
 
-- **The agents are still Python.** The engine exists in three languages, but the simulated traders don't, which is why the simulation is only ~2x faster on Rust (see above).
+- **Only the default market is in Rust.** Custom agents (the A-S maker comparison, the forecast maker) still run in Python on the Rust book.
 - **The matching engine is still single-threaded.** There is now a lock-free SPSC queue and a two-thread pipeline mode measured against a mutex baseline, but the deterministic single-threaded path remains what the differential test runs against, on purpose: an oracle has to be reproducible.
 - **Multi-symbol, but not multi-threaded across symbols.** There is an instrument registry and a venue that routes each symbol to its own book, but one thread serves all of them. Sharding symbols across threads is the obvious scaling step, since books don't interact.
 - **Live capture tested against a fake feed, not the real exchange.** A local websocket server speaking Binance's wire format, with a scripted sequence gap. It found a real bug on the first run: a closed socket raised an unhandled exception and killed the recorder, despite the module claiming to handle disconnects. What it does not cover is the real feed's rate limits, 24-hour connection recycling, and genuinely out-of-order traffic.
@@ -285,6 +287,6 @@ When I ran it, the agent rejected its own best finding as a search artifact. Tha
 
 ## What I would do next
 
-Move the simulator's agents into compiled code, since the measurement above says that's the only way past a ~1.9x end-to-end gain, and do it with the same discipline as the engine ports: a differential test that holds the Python agents as the oracle.
+Port the custom agents (A-S, the forecast maker) to Rust the same way, so every simulation in the app runs native.
 
 After that, the one lead the week of data turned up. It's now a pre-registered test, written into `engine/study.py` on 2026-10-30 before any of its data existed: on the first 24 hour-long recordings after that date, order flow should add more in hours where the mid moves more often (rank correlation above zero, one-sided p below 0.05). The sample size is fixed in advance so the answer can't be steered by choosing when to stop, and the recordings run themselves. Whatever it says goes in here. Then the stylized facts on real book returns next to the simulator's.

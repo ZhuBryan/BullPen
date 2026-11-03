@@ -4,6 +4,7 @@ name: CI
 #   python  every Python self-check and the 450+ endpoint checks
 #   rust    cargo test, then the Python-vs-Rust differential test on 20,000
 #           ops, on Linux and on Windows (where the project is developed)
+#   fuzz    a 60 s fuzz campaign against all three engines and every parser
 #   pyo3    builds the Rust engine as a Python extension, proves it matches
 #           the Python engine event for event, then reruns the entire backend
 #           test suite with the Rust book underneath it
@@ -148,6 +149,32 @@ jobs:
           python -m backend.market_sim
           python -m backend.exec_sim
           python -m backend.book_backtest
+
+  fuzz:
+    # 60 seconds of hostile order streams through Python vs C++ vs Rust (any
+    # disagreement is shrunk to a minimal op file and uploaded), and garbage
+    # bytes through every input reader, the C++ one under AddressSanitizer.
+    # A new seed every run, so coverage accumulates over time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the Rust engine
+        working-directory: engine/rust
+        run: cargo build --release
+      - name: Fuzz
+        working-directory: engine
+        run: python fuzz.py --seconds 60 --seed ${{ github.run_number }}
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: fuzz-failures
+          path: engine/fuzz_fail_*.txt
 
   bench:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

@@ -34,6 +34,7 @@ Run `python backend/market_sim.py` for the self-check.
 """
 
 import math
+import os
 import random
 import time
 from functools import partial
@@ -47,7 +48,6 @@ try:
     from engine.fastbook import Book
     from engine.orderbook import BUY, SELL
 except ImportError:                        # running this file directly
-    import os
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from engine.fastbook import Book
@@ -601,21 +601,61 @@ class Simulation:
         return self.result()
 
     def result(self):
-        mark = self.mid()
-        return {
-            "bars": self.bars,
-            "last_price": round(self.last * TICK, 2),
-            "trades": self._trades + sum(
-                1 for e in self.book.events_since(self._seen_events) if e[0] == "trade"),
-            "agents": sorted(
-                [{"name": a.name, "kind": type(a).__name__,
-                  "position": a.position,
-                  "cash": round(a.cash, 2),
-                  "equity": round(a.equity(mark), 2),
-                  "pnl": round(a.equity(mark) - a.start_cash, 2)}
-                 for a in self.agents],
-                key=lambda d: -d["pnl"]),
-        }
+        trades = self._trades + sum(
+            1 for e in self.book.events_since(self._seen_events) if e[0] == "trade")
+        return _result(self.bars, self.last, trades, self.agents, self.mid())
+
+
+def _result(bars, last, trades, agents, mark):
+    """The dict /api/sim returns. Shared by the Python and Rust paths, so the
+    rounding and sorting happen in one place and can't drift apart."""
+    return {
+        "bars": bars,
+        "last_price": round(last * TICK, 2),
+        "trades": trades,
+        "agents": sorted(
+            [{"name": a.name, "kind": type(a).__name__,
+              "position": a.position,
+              "cash": round(a.cash, 2),
+              "equity": round(a.equity(mark), 2),
+              "pnl": round(a.equity(mark) - a.start_cash, 2)}
+             for a in agents],
+            key=lambda d: -d["pnl"]),
+    }
+
+
+# The default market, run entirely in Rust (engine/rust/src/sim.rs) when the
+# extension is built and up to date. It is bit-for-bit identical to
+# Simulation(seed).run(steps), which stays the oracle: engine/test_sim_rust.py
+# compares the two. BULLPEN_ENGINE=python forces Python, as for the book.
+_rust_simulate = None
+if os.environ.get("BULLPEN_ENGINE", "").lower() != "python":
+    try:
+        from bullpen_engine import simulate_default as _rust_simulate
+    except ImportError:             # not built, or built before sim.rs existed
+        pass
+
+
+def run_default(seed=7, steps=500, engine=None):
+    """Simulation(seed=seed).run(steps) on the default agents, fastest way.
+
+    Returns (result dict, mid history). engine="python" or "rust" forces one
+    (tests); None picks Rust when available. Seeds outside int64 go to Python.
+    """
+    use_rust = (_rust_simulate is not None and engine != "python"
+                and -2**63 < int(seed) < 2**63)
+    if engine == "rust" and not use_rust:
+        raise RuntimeError("Rust simulator not available: build engine/rust")
+    if not use_rust:
+        sim = Simulation(seed=seed)
+        return sim.run(steps), sim.history
+    raw_bars, last, trades, mark, raw_agents, history = _rust_simulate(int(seed), int(steps))
+    agents = default_agents()
+    for a, (position, cash) in zip(agents, raw_agents):
+        a.position, a.cash = position, cash
+    bars = [{"o": o * TICK, "h": h * TICK, "l": lo * TICK, "c": c * TICK, "v": v}
+            for o, h, lo, c, v in raw_bars]
+    return _result(bars, last, trades, agents, mark), history
 
 
 def _maker_summary(m, inv, mid_end):

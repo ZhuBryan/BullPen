@@ -18,7 +18,7 @@
 //! it happens to be whole (5.0), because silently rounding money is how
 //! ledgers go wrong.
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyTuple};
 
@@ -235,10 +235,34 @@ impl PyBook {
     }
 }
 
+/// Bars as (open, high, low, close, trade count) in ticks, last trade price,
+/// trade count, final mid, (position, cash) per agent, and the mid path.
+type SimOut = (Vec<(i64, i64, i64, i64, usize)>, i64, usize, i64, Vec<(i64, f64)>, Vec<i64>);
+
+/// Run the default market (backend/market_sim.py's default_agents()) for
+/// `steps` steps entirely in Rust, bit-for-bit identical to the Python
+/// `Simulation(seed).run(steps)` (see src/sim.rs). Returns raw numbers;
+/// market_sim.run_default turns them into the same dict Python returns, so
+/// rounding and formatting happen in exactly one place.
+#[pyfunction]
+fn simulate_default(seed: i64, steps: usize) -> PyResult<SimOut> {
+    let mut s = crate::sim::Sim::new(seed);
+    s.run(steps).map_err(|e| PyRuntimeError::new_err(e))?;
+    let bars: Vec<(i64, i64, i64, i64, usize)> = s
+        .bars
+        .iter()
+        .map(|b| (b.open, b.high, b.low, b.close, b.count))
+        .collect();
+    let mark: i64 = s.mid();
+    let agents: Vec<(i64, f64)> = s.agents();
+    Ok((bars, s.last, s.trades, mark, agents, s.history))
+}
+
 /// Module entry point. The function name must equal the module name Python
 /// imports (`bullpen_engine`), because PyO3 exports it as `PyInit_bullpen_engine`.
 #[pymodule]
 fn bullpen_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBook>()?;
+    m.add_function(wrap_pyfunction!(simulate_default, m)?)?;
     Ok(())
 }

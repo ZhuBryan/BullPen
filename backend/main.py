@@ -499,11 +499,11 @@ def sim_run(req: SimRequest):
     so the returned candles are the market's own output. Deterministic for a
     given seed.
     """
-    from backend.market_sim import Simulation
+    from backend.market_sim import run_default
 
     steps = max(50, min(int(req.steps), 2_000))   # keep a request bounded
     with APP_METRICS.timer("sim.run"):
-        out = Simulation(seed=int(req.seed)).run(steps)
+        out, _ = run_default(seed=int(req.seed), steps=steps)
     APP_METRICS.incr("sim.runs")
     APP_METRICS.incr("sim.trades", out["trades"])
     return out

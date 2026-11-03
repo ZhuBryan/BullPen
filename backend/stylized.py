@@ -36,14 +36,14 @@ import numpy as np
 
 try:
     from backend.data import get_prices
-    from backend.market_sim import Simulation
+    from backend.market_sim import run_default
     from engine.replay import best_pair, replay
 except ImportError:                        # running this file directly
     import os
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from backend.data import get_prices
-    from backend.market_sim import Simulation
+    from backend.market_sim import run_default
     from engine.replay import best_pair, replay
 
 MAX_LAG = 20
@@ -245,9 +245,8 @@ def compare(ticker="SPY", start="2015-01-01", end="2025-01-01", sim_steps=3000, 
     close = df["Close"].astype(float).to_numpy()
     real_r = np.diff(np.log(close))
 
-    sim = Simulation(seed=seed)
-    sim.run(int(sim_steps))
-    sim_r = np.diff(np.log(np.asarray(sim.history, float)))
+    _, history = run_default(seed=seed, steps=int(sim_steps))
+    sim_r = np.diff(np.log(np.asarray(history, float)))
 
     real, simf = facts(real_r), facts(sim_r)
     pick = lambda fx: {f: fx[f] for f in FACT_NAMES}
@@ -285,9 +284,8 @@ def sim_seed_sweep(seeds=range(1, 11), steps=3000):
     passes = {f: 0 for f in FACT_NAMES}
     lag1 = []
     for sd in seeds:
-        sim = Simulation(seed=sd)
-        sim.run(int(steps))
-        fx = facts(np.diff(np.log(np.asarray(sim.history, float))))
+        _, history = run_default(seed=sd, steps=int(steps))
+        fx = facts(np.diff(np.log(np.asarray(history, float))))
         lag1.append(fx["acf"][0])
         for f in FACT_NAMES:
             passes[f] += fx[f]["pass"]

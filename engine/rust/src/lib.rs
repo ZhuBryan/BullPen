@@ -35,6 +35,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+pub mod sim;
 pub mod spsc;
 
 // Python bindings (PyO3). Only compiled with `--features python`, so the

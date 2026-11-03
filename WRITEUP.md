@@ -251,6 +251,22 @@ The Rust engine matches orders 12.7x faster than the Python one, and the market 
 
 That one number settles it. By Amdahl's law, an engine 12.7x faster at 48% of the work gives at most about 1.8x overall, and an infinitely fast one about 1.9x. Batching orders into one call per agent trims the cost of crossing from Python into Rust, but it can't move that ceiling. Only moving the agents themselves out of Python can. It's the cancel story again at a larger scale: measure where the time goes before deciding what to speed up.
 
+## What fuzzing found
+
+`fuzz.py` throws hostile order streams at all three engines (one price level hammered, prices up to 2^63-1, cancels of ids that never existed or already filled) and shrinks any disagreement to the smallest op file that still shows it. It also feeds random and damaged bytes to every input reader, the C++ one under AddressSanitizer. A 7.5 minute campaign ran 8.67 million ops through Python and C++ with zero disagreements. The matching logic was clean.
+
+The readers were not. Three bugs, all fixed with regression tests:
+
+- The FIX decoder crashed with the wrong exception on a byte above 127, and Python's `isdigit()` accepted "¹" as a tag number.
+- One damaged byte in the middle of a market recording lost the whole file instead of the part after the damage.
+- My own crash journal, written the week before, parsed "M B S" as a valid command, logged it, and then crashed on it every time the log was reopened. The exhaustive crash tests passed because they only ever fed it well-formed commands. A test suite tells you what you checked, not what you didn't.
+
+## Paper trading against real hours
+
+`paper.py` runs three market makers (quote at the touch, Avellaneda-Stoikov, and quotes skewed by the order-flow forecast) through real Kraken recordings as if live. Each sees only the past, its orders go live 100 ms after it decides, and it is filled only when a real recorded trade reaches it through the queue at its price. The forecast is fitted on the first 15 minutes of each hour, and nobody quotes during that time.
+
+On the first two usable hours, all three lose money before fees: about -$2.5 to -$2.9 per hour at 0.001 BTC a quote. The markouts say why. A second after a fill, the price has moved about 1 bp against us, roughly 70 times the half spread we earn. The people who trade with a passive quote on BTC/USD mostly know something. At a new account's 40 bp maker fee the loss is $49 to $65 an hour. The forecast skew doesn't rescue it, which matches the earlier finding that the forecast's edge is a fraction of a basis point. This now runs every three hours, so the number will firm up or change with more data.
+
 ## Honest limitations
 
 The things this does not do, since a half-built project described accurately is worth more than a finished one described loosely:

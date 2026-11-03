@@ -15,6 +15,8 @@ The pieces, each usable on its own:
 9. **Metrics**: latency histograms and counters, Prometheus exposition
 10. **Python bindings for the Rust engine** (PyO3), so the rest of the project can run on it
 11. **Crash recovery**: a checksummed write-ahead log of commands, tested by crashing at every byte offset
+12. **Fuzzing**: hostile op streams across all three engines with automatic shrinking, and garbage bytes into every parser
+13. **Paper market making** on real Kraken recordings: queue-position fills from real trades, latency, fees, markouts
 
 The Python side is standard library plus numpy; the Rust port is standard library only. No API keys, no paid data, no framework.
 
@@ -228,6 +230,9 @@ metrics.py     latency histograms, counters, Prometheus text
 bench.py       throughput and tail latency harness
 diff_test.py   proves the Rust engine matches this one, event for event
 wal.py         write-ahead log: commands hit disk before they run; recovery replays them
+fuzz.py        differential fuzzing of the engines and parser fuzzing; shrinks failures
+paper.py       paper market makers on real Kraken recordings, scored after fees
+test_sim_rust.py  the Rust market simulation, compared with Python bit for bit
 fastbook.py    picks the Rust book when its Python extension is built, else this one
 test_pyo3.py   20,000 random ops through both engines via PyO3, every event compared
 test.py        runs every self-check

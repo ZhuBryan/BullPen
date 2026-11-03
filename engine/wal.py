@@ -48,11 +48,23 @@ _ARITY = {"L": 4, "M": 3, "X": 2}
 
 
 def parse_op(op):
-    """Split an op-file command ("L B 100 5", "M S 7", "X 12"); ValueError if malformed."""
+    """Split an op-file command ("L B 100 5", "M S 7", "X 12"); ValueError if malformed.
+
+    Positions are strict: the side is the second field and every other field
+    is a whole number. (An earlier version turned "B"/"S" into a side wherever
+    it appeared, so "M B S" parsed, was logged, and then crashed the book with
+    a TypeError, which made the log impossible to reopen. Found by fuzz.py.)
+    """
     f = op.split()
-    if not f or _ARITY.get(f[0]) != len(f) or (f[0] != "X" and f[1] not in ("B", "S")):
-        raise ValueError(f"malformed op {op!r}")
-    return f[0], [BUY if x == "B" else SELL if x == "S" else int(x) for x in f[1:]]
+    try:
+        if f and _ARITY.get(f[0]) == len(f):
+            if f[0] == "X":
+                return "X", [int(f[1])]
+            if f[1] in ("B", "S"):
+                return f[0], [BUY if f[1] == "B" else SELL] + [int(x) for x in f[2:]]
+    except ValueError:
+        pass
+    raise ValueError(f"malformed op {op!r}")
 
 
 def apply_op(book, op):
@@ -198,7 +210,22 @@ def demo():
         w.close()
         assert log(w.book) == full and open(torn, "rb").read() == data
 
-        # 5. Corruption refuses to open, unless asked to repair.
+        # 5. A malformed command is refused before it is logged, so it can
+        #    never poison the log (regression: "M B S" used to be logged, then
+        #    crash the book, then crash every reopen).
+        bad_ops = os.path.join(d, "bad_ops.wal")
+        w = Wal(bad_ops, fsync=False)
+        for op in ("M B S", "L B 5 S", "L S S 5", "X B", "L B 1.5 2", "Q B 1 1", ""):
+            try:
+                w.append(op)
+                raise AssertionError(f"accepted {op!r}")
+            except ValueError:
+                pass
+        w.append("L B 100 5")
+        w.close()
+        assert Wal(bad_ops, fsync=False).records == 1
+
+        # 6. Corruption refuses to open, unless asked to repair.
         bad = os.path.join(d, "bad.wal")
         blob = bytearray(data)
         blob[ends[29] + 3] ^= 0x01                     # one bit, in record 31

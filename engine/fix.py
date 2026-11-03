@@ -103,8 +103,14 @@ class FixError(ValueError):
 # Wire format
 # ---------------------------------------------------------------------------
 def checksum(payload: str) -> str:
-    """Sum of every byte modulo 256, always three digits."""
-    return f"{sum(payload.encode('ascii')) % 256:03d}"
+    """Sum of every byte modulo 256, always three digits.
+
+    FIX is a byte protocol, and the session reads frames as latin-1 (one
+    character per byte), so latin-1 turns the text back into exactly the bytes
+    on the wire. ASCII refused any byte above 127 with a UnicodeEncodeError
+    instead of a FixError (found by fuzz.py).
+    """
+    return f"{sum(payload.encode('latin-1')) % 256:03d}"
 
 
 def encode(msg_type: str, fields, sender="BULLPEN", target="VENUE", seq=1) -> str:
@@ -137,7 +143,9 @@ def decode(raw: str, verify=True) -> dict:
         if "=" not in p:
             raise FixError(f"field without '=': {p!r}")
         tag, _, value = p.partition("=")
-        if not tag.isdigit():
+        # isascii too: str.isdigit() says yes to "\xb9" (superscript one),
+        # which int() then refuses with a bare ValueError (found by fuzz.py).
+        if not (tag.isascii() and tag.isdigit()):
             raise FixError(f"non-numeric tag: {tag!r}")
         pairs.append((int(tag), value))
 
@@ -149,12 +157,16 @@ def decode(raw: str, verify=True) -> dict:
         if pairs[-1][0] != TAGS["CheckSum"]:
             raise FixError("missing CheckSum(10) as last field")
 
-        idx = raw.index(f"{SOH}{TAGS['CheckSum']}=") + 1
-        if checksum(raw[:idx]) != pairs[-1][1]:
-            raise FixError(f"checksum mismatch: expected {checksum(raw[:idx])}, "
-                           f"got {pairs[-1][1]}")
-        body_start = raw.index(SOH, raw.index(f"{TAGS['BodyLength']}=")) + 1
-        if int(pairs[1][1]) != idx - body_start:
+        try:
+            idx = raw.rindex(f"{SOH}{TAGS['CheckSum']}=") + 1
+            body_start = raw.index(SOH, raw.index(f"{TAGS['BodyLength']}=")) + 1
+            declared = int(pairs[1][1])
+            expected = checksum(raw[:idx])
+        except ValueError as e:      # no SOH before 10=, BodyLength not a number, non-latin-1 text
+            raise FixError(f"malformed message: {e}") from None
+        if expected != pairs[-1][1]:
+            raise FixError(f"checksum mismatch: expected {expected}, got {pairs[-1][1]}")
+        if declared != idx - body_start:
             raise FixError(f"body length mismatch: declared {pairs[1][1]}, "
                            f"actual {idx - body_start}")
 
@@ -402,6 +414,21 @@ def demo():
     assert not can_transition(OrdStatus.NEW, OrdStatus.REPLACED), \
         "replace must pass through PendingReplace"
     assert can_transition(OrdStatus.PENDING_REPLACE, OrdStatus.REPLACED)
+
+    # Hostile bytes get a FixError, never another exception (found by fuzz.py):
+    # a byte above 127 used to raise UnicodeEncodeError from checksum(), and
+    # a non-numeric BodyLength a bare ValueError from int().
+    hi = new_order_single("X1", "CAF\xc9", Side.BUY, 1, price=1.0)   # latin-1 byte 0xC9
+    assert get(decode(hi), "Symbol") == "CAF\xc9", "a checksummed high byte is legal"
+    for junk in (hi.replace("CAF", "CAG"),                        # checksum now wrong
+                 f"8={BEGIN_STRING}{SOH}9=x{SOH}10=000{SOH}",      # BodyLength not a number
+                 f"8={BEGIN_STRING}{SOH}9=1{SOH}\xb94=1{SOH}10=000{SOH}",  # superscript "digit" tag
+                 f"8={BEGIN_STRING}{SOH}9=1{SOH}55=\u20ac{SOH}10=000{SOH}"):  # not even latin-1
+        try:
+            decode(junk)
+            raise AssertionError(f"accepted {junk!r}")
+        except FixError:
+            pass
 
     print("ok — FIX encode/decode, checksum, body length, builders, state machine")
 

@@ -49,12 +49,15 @@ def _records(path):
     """
     n = 0
     try:
-        with gzip.open(path, "rt") as fh:
+        # Binary mode, decoded line by line: in text mode one damaged byte
+        # raised UnicodeDecodeError out of the loop itself and lost the whole
+        # file (found by fuzz.py). Damage now ends the read like a cut does.
+        with gzip.open(path, "rb") as fh:
             for line in fh:
                 try:
                     msg = json.loads(line)
-                except json.JSONDecodeError:
-                    break                    # half-written last line
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    break                    # half-written last line, or a damaged one
                 n += 1
                 yield msg
     except (EOFError, zlib.error, gzip.BadGzipFile) as e:
@@ -298,6 +301,15 @@ def demo():
         assert kinds == ["book", "book", "trade", "book"], kinds
         assert trades == 1
         assert last == ((99.0, 12.0), (102.0, 7.0)), f"book wrong at end: {last}"
+
+        # A damaged byte inside the text (not a clean cut) keeps what came
+        # before it instead of raising UnicodeDecodeError (found by fuzz.py).
+        raw = "\n".join(json.dumps(r) for r in rows).encode()
+        bad = f"{d}/bad.jsonl.gz"
+        cut = raw.index(b"trade")
+        with gzip.open(bad, "wb") as fh:
+            fh.write(raw[:cut] + b"\xff" + raw[cut:])
+        assert len(list(_records(bad))) == 2
 
     print("ok — queue fills, features, OFI, and replay all pass")
 

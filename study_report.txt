@@ -1,5 +1,5 @@
-analysing kraken_BTCUSD_20261109_172204.jsonl.gz (4.0 MB)...
-  done in 2s: adds +0.080 IC
+analysing kraken_BTCUSD_20261110_021921.jsonl.gz (4.7 MB)...
+  done in 2s: adds +0.034 IC
 
 start             day   events  moved  model IC  continue    adds  gross bp
 2026-10-20T17:16  Tue   15,994  11.2%     0.219     0.343  -0.123    0.0202
@@ -74,9 +74,10 @@ start             day   events  moved  model IC  continue    adds  gross bp
 2026-11-08T19:55  Sun  392,583  15.4%     0.277     0.245  +0.032    0.0269
 2026-11-09T06:31  Mon  180,476  18.2%     0.324     0.267  +0.057    0.0396
 2026-11-09T17:22  Mon  140,410  14.8%     0.361     0.281  +0.080    0.0298
+2026-11-10T02:19  Tue  166,053  12.9%     0.387     0.353  +0.034    0.0260
 
 session           recordings  mean events  mean adds    min..max adds
-night 00-06               18      135,271     -0.023   -0.175..+0.047
+night 00-06               19      136,891     -0.020   -0.175..+0.047
 morning 06-12             15      222,110     +0.018   -0.078..+0.124
 afternoon 12-18           32      146,434     +0.007   -0.123..+0.095
 evening 18-24              7      319,402     +0.001   -0.040..+0.059

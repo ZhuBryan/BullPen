@@ -1,20 +1,20 @@
-capture: data/kraken_BTCUSD_20261116_143701.jsonl.gz
-322598 book events, horizon 10 events, OFI window 10
-order-flow forecast, 4 purged walk-forward folds, 258076 out-of-sample rows, mid moved in 15.6%
+capture: data/kraken_BTCUSD_20261116_225418.jsonl.gz
+183370 book events, horizon 10 events, OFI window 10
+order-flow forecast, 4 purged walk-forward folds, 146696 out-of-sample rows, mid moved in 13.7%
               AUC    hit      IC   IC t  trades  gross bp/trade  net bp/trade
-model       0.851  0.811   0.319   51.3  248574          0.0271       -0.9729
-continue    0.691  0.738   0.269   43.3   40384          0.0677       -0.9323
-majority    0.500  0.544   0.000    0.0  258076         -0.0009       -1.0009
+model       0.918  0.882   0.357   43.2  140128          0.0255       -0.9745
+continue    0.739  0.821   0.319   38.7   20057          0.0676       -0.9324
+majority    0.500  0.477   0.000    0.0  146696         -0.0009       -1.0009
 zero        0.500    nan   0.000    0.0       0          0.0000        0.0000
 |IC t| under ~2 is indistinguishable from noise. 'net' charges the cost per trade; real taker fees are far larger than 1 bp.
-order flow adds +0.050 IC beyond the no-model 'continue the last move' rule
-microprice-label logit, per-fold AUC: 0.574 0.569 0.636 0.571 (see build_dataset caveat)
+order flow adds +0.038 IC beyond the no-model 'continue the last move' rule
+microprice-label logit, per-fold AUC: 0.523 0.576 0.629 0.652 (see build_dataset caveat)
 
 could ANY forecast pay its costs? perfect foresight, mean net bp per round trip
   hold  |move|  spread     taker new account      taker $10M/month  taker Pro 5 ($500M+) maker bound Pro 5  model IC  model net
-    1s    0.00    0.01               -159.70                -19.70                 -9.70              0.43     0.475      -9.75
-   10s    1.24    0.01               -158.47                -18.47                 -8.47              1.66     0.261      -9.50
-   60s    3.00    0.01               -156.26                -16.26                 -6.26              3.87     0.087      -9.60
-  300s    6.89    0.01               -150.34                -10.34                 -0.34              9.79     0.049      -9.91
-  900s   11.07    0.01               -144.32                 -4.32                  5.68             15.79     0.078     -11.05
+    1s    0.00    0.01               -159.76                -19.76                 -9.76              0.32     0.524      -9.80
+   10s    0.86    0.01               -158.87                -18.87                 -8.87              1.20     0.328      -9.50
+   60s    2.74    0.01               -156.78                -16.78                 -6.78              3.30     0.102      -9.48
+  300s    5.88    0.01               -153.49                -13.49                 -3.49              6.59    -0.008      -9.59
+  900s    6.11    0.01               -153.11                -13.11                 -3.11              6.96     0.121      -9.64
 bp = basis points of price (1 bp = 0.01%). Taker pays the spread and two taker fees; the maker bound assumes free, perfectly timed fills, so it is a ceiling. 'model net' is the order-flow model trading at the best tier's taker cost.

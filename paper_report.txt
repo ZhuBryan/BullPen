@@ -1,4 +1,4 @@
-paper-trading kraken_BTCUSD_20261120_064012.jsonl.gz (17.9 MB)...
+paper-trading kraken_BTCUSD_20261120_152045.jsonl.gz (20.4 MB)...
 
 start               strategy  fills  spread $ inventory $   gross $ mark 1s bp mark 10s bp net new account $
 2026-11-03T05:53         A-S    447    -0.029      -0.443    -0.472    -0.9183     -1.2402           -36.973
@@ -154,23 +154,26 @@ start               strategy  fills  spread $ inventory $   gross $ mark 1s bp m
 2026-11-20T06:40         A-S    970    -0.303      -3.499    -3.802    -1.3845     -1.5201           -80.476
 2026-11-20T06:40       naive    636    -0.043      -2.372    -2.415    -1.4473     -1.6207           -58.350
 2026-11-20T06:40  order-flow    898    -0.254      -3.506    -3.760    -1.3847     -1.4038           -72.402
+2026-11-20T15:20         A-S   1668    -1.255      -3.232    -4.487    -1.2268     -1.3087          -179.393
+2026-11-20T15:20       naive   1043    +0.010      -4.308    -4.298    -1.1666     -1.4964          -104.039
+2026-11-20T15:20  order-flow   1286    -0.460      -3.676    -4.135    -1.3417     -1.5403          -124.769
 
 totals across recordings, USD per hour of quoting (mean, 95% bootstrap interval over recordings):
-  A-S         51 recordings, 43891 fills
-      gross              -3.055  [-3.823, -2.395]
-      new account       -96.393  [-112.899, -81.419]
-      $10M/month         -3.055  [-3.823, -2.395]
-      Pro 5 ($500M+)     -3.055  [-3.823, -2.395]
-  naive       51 recordings, 28053 fills
-      gross              -2.274  [-2.917, -1.697]
-      new account       -70.733  [-84.412, -58.425]
-      $10M/month         -2.274  [-2.917, -1.697]
-      Pro 5 ($500M+)     -2.274  [-2.917, -1.697]
-  order-flow  51 recordings, 42621 fills
-      gross              -2.906  [-3.595, -2.319]
-      new account       -91.731  [-105.413, -78.713]
-      $10M/month         -2.906  [-3.595, -2.319]
-      Pro 5 ($500M+)     -2.906  [-3.595, -2.319]
+  A-S         52 recordings, 45559 fills
+      gross              -3.112  [-3.870, -2.435]
+      new account       -99.141  [-116.002, -83.272]
+      $10M/month         -3.112  [-3.870, -2.435]
+      Pro 5 ($500M+)     -3.112  [-3.870, -2.435]
+  naive       52 recordings, 29096 fills
+      gross              -2.340  [-2.989, -1.752]
+      new account       -72.041  [-85.714, -59.292]
+      $10M/month         -2.340  [-2.989, -1.752]
+      Pro 5 ($500M+)     -2.340  [-2.989, -1.752]
+  order-flow  52 recordings, 43907 fills
+      gross              -2.956  [-3.630, -2.361]
+      new account       -93.167  [-106.831, -80.233]
+      $10M/month         -2.956  [-3.630, -2.361]
+      Pro 5 ($500M+)     -2.956  [-3.630, -2.361]
 
 Size 0.001 BTC per quote, inventory limit 5 quotes, 100 ms latency, first 15 min of each recording used to fit the forecast.
 Fills come only from real recorded trades that reach us through the queue. At the 'new account' fee (40 bp) market making loses on every fill: the spread on BTC/USD is about 0.001%, the fee 0.40%. That is the finding, not a bug; see the 'Pro 5 ($500M+)' row for what the strategy itself is worth. Negative markouts are adverse selection: the traders who hit our quotes knew where the price was going.

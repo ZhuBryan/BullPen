@@ -1,5 +1,5 @@
-analysing kraken_BTCUSD_20261123_074116.jsonl.gz (12.4 MB)...
-  done in 5s: adds +0.003 IC
+analysing kraken_BTCUSD_20261123_211253.jsonl.gz (14.5 MB)...
+  done in 6s: adds +0.066 IC
 
 start             day   events  moved  model IC  continue    adds  gross bp
 2026-10-20T17:16  Tue   15,994  11.2%     0.219     0.343  -0.123    0.0202
@@ -113,12 +113,13 @@ start             day   events  moved  model IC  continue    adds  gross bp
 2026-11-22T14:40  Sun  257,278   7.0%     0.223     0.248  -0.025    0.0111
 2026-11-22T20:44  Sun  624,628  12.7%     0.190     0.206  -0.017    0.0149
 2026-11-23T07:41  Mon  487,672  18.7%     0.228     0.225  +0.003    0.0225
+2026-11-23T21:12  Mon  502,572  40.4%     0.164     0.098  +0.066    0.0250
 
 session           recordings  mean events  mean adds    min..max adds
 night 00-06               24      159,589     -0.005   -0.175..+0.090
 morning 06-12             24      305,273     +0.026   -0.078..+0.124
 afternoon 12-18           45      211,423     +0.021   -0.123..+0.112
-evening 18-24             18      341,987     +0.028   -0.040..+0.100
+evening 18-24             19      350,438     +0.030   -0.040..+0.100
 'adds' = model IC minus the no-model 'continue the last move' rule's IC: what order flow tells you beyond the price path. 'gross bp' is before any fee.
 
 pre-registered test (2026-10-30): on the first 24 recordings after 2026-10-30T13:30, does order flow add more in hours where the mid moves more often?
